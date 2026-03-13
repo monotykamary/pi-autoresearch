@@ -472,6 +472,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   let autoresearchMode = false;
   let lastCtx: ExtensionContext | null = null;
 
+  // Auto-resume tracking
+  let lastAutoResumeTime = 0;
+  let experimentsThisSession = 0; // reset on agent_start, incremented on log_experiment
+
   // Running experiment state (for spinner in fullscreen overlay)
   let runningExperiment: { startedAt: number; command: string } | null = null;
   let overlayTui: { requestRender: () => void } | null = null;
@@ -710,12 +714,25 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   pi.on("session_fork", async (_e, ctx) => reconstructState(ctx));
   pi.on("session_tree", async (_e, ctx) => reconstructState(ctx));
 
+  // Reset per-session experiment counter when agent starts
+  pi.on("agent_start", async () => {
+    experimentsThisSession = 0;
+  });
+
   // Clear running experiment state when agent stops; check ideas file for continuation
   pi.on("agent_end", async (_event, ctx) => {
     runningExperiment = null;
     if (overlayTui) overlayTui.requestRender();
 
     if (!autoresearchMode) return;
+
+    // Don't auto-resume if no experiments ran this session (user likely stopped manually)
+    if (experimentsThisSession === 0) return;
+
+    // Rate-limit auto-resume to once every 5 minutes
+    const now = Date.now();
+    if (now - lastAutoResumeTime < 5 * 60 * 1000) return;
+    lastAutoResumeTime = now;
 
     // Auto-continue: send a message to resume the loop
     // The agent reads autoresearch.md on startup which has all context
@@ -1040,6 +1057,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       };
 
       state.results.push(experiment);
+      experimentsThisSession++;
 
       // Register any new secondary metric names
       for (const name of Object.keys(secondaryMetrics)) {
