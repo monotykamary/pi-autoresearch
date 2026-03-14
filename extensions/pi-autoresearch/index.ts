@@ -57,6 +57,8 @@ interface ExperimentState {
   name: string | null;
   /** Current segment index (incremented on each init_experiment) */
   currentSegment: number;
+  /** Optional target value — stop when metric reaches this */
+  targetValue: number | null;
 }
 
 interface RunDetails {
@@ -120,6 +122,12 @@ const InitParams = Type.Object({
     Type.String({
       description:
         'Whether "lower" or "higher" is better for the primary metric. Default: "lower".',
+    })
+  ),
+  target_value: Type.Optional(
+    Type.Number({
+      description:
+        'Optional target value to stop at. Loop stops when primary metric reaches this (lower ≤ target, higher ≥ target).',
     })
   ),
 });
@@ -497,6 +505,9 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   // Track last run's checks result so log_experiment can gate "keep" status
   let lastRunChecks: { pass: boolean; output: string; duration: number } | null = null;
 
+  // Track if target has been hit to stop auto-resume
+  let targetHit = false;
+
   // Running experiment state (for spinner in fullscreen overlay)
   let runningExperiment: { startedAt: number; command: string } | null = null;
   let overlayTui: { requestRender: () => void } | null = null;
@@ -514,6 +525,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     secondaryMetrics: [],
     name: null,
     currentSegment: 0,
+    targetValue: null,
   };
 
   const autoresearchHelp = () =>
@@ -566,6 +578,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               if (entry.metricName) state.metricName = entry.metricName;
               if (entry.metricUnit !== undefined) state.metricUnit = entry.metricUnit;
               if (entry.bestDirection) state.bestDirection = entry.bestDirection;
+              if (entry.targetValue !== undefined) state.targetValue = entry.targetValue;
               // Increment segment (first config = 0, second = 1, etc.)
               if (state.results.length > 0) segment++;
               state.currentSegment = segment;
@@ -765,6 +778,12 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
     if (!autoresearchMode) return;
 
+    // Stop if target was hit
+    if (targetHit) {
+      ctx.ui.notify(`🎯 Autoresearch target hit! Stopping.`, "success");
+      return;
+    }
+
     // Don't auto-resume if no experiments ran this session (user likely stopped manually)
     if (experimentsThisSession === 0) return;
 
@@ -851,6 +870,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       "Call init_experiment exactly once at the start of an autoresearch session, before the first run_experiment.",
       "If autoresearch.jsonl already exists with a config, do NOT call init_experiment again.",
       "If the optimization target changes (different benchmark, metric, or workload), call init_experiment again to insert a new config header and reset the baseline.",
+      "Optionally set target_value to stop when the metric reaches a threshold (≤ target for lower, ≥ target for higher).",
     ],
     parameters: InitParams,
 
@@ -860,6 +880,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       state.name = params.name;
       state.metricName = params.metric_name;
       state.metricUnit = params.metric_unit ?? "";
+      state.targetValue = params.target_value ?? null;
       if (params.direction === "lower" || params.direction === "higher") {
         state.bestDirection = params.direction;
       }
@@ -868,6 +889,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       state.results = [];
       state.bestMetric = null;
       state.secondaryMetrics = [];
+      targetHit = false;
 
       // Write config header to jsonl (append for re-init, create for first)
       try {
@@ -878,6 +900,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           metricName: state.metricName,
           metricUnit: state.metricUnit,
           bestDirection: state.bestDirection,
+          targetValue: state.targetValue,
         });
         if (isReinit) {
           fs.appendFileSync(jsonlPath, config + "\n");
@@ -898,10 +921,13 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       updateWidget(ctx);
 
       const reinitNote = isReinit ? " (re-initialized — previous results archived, new baseline needed)" : "";
+      const targetNote = state.targetValue !== null
+        ? `\n🎯 Target: ${state.metricName} ${state.bestDirection === "lower" ? "≤" : "≥"} ${formatNum(state.targetValue, state.metricUnit)}`
+        : "";
       return {
         content: [{
           type: "text",
-          text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
+          text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${targetNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
         }],
         details: { state: { ...state } },
       };
@@ -1323,6 +1349,18 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       // Refresh fullscreen overlay if open
       if (overlayTui) overlayTui.requestRender();
 
+      // Check if target is hit
+      if (state.targetValue !== null) {
+        const hit = state.bestDirection === "lower"
+          ? experiment.metric <= state.targetValue
+          : experiment.metric >= state.targetValue;
+        if (hit) {
+          targetHit = true;
+          text += `\n🎯 TARGET HIT: ${state.metricName} ${state.bestDirection === "lower" ? "≤" : "≥"} ${formatNum(state.targetValue, state.metricUnit)}`;
+          text += `\nAutoresearch will stop after this experiment.`;
+        }
+      }
+
       return {
         content: [{ type: "text", text }],
         details: { experiment, state: { ...state } } as LogDetails,
@@ -1615,6 +1653,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         autoresearchMode = false;
         autoResumeTurns = 0;
         experimentsThisSession = 0;
+        targetHit = false;
         state = {
           results: [],
           bestMetric: null,
@@ -1624,6 +1663,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           secondaryMetrics: [],
           name: null,
           currentSegment: 0,
+          targetValue: null,
         };
         updateWidget(ctx);
 

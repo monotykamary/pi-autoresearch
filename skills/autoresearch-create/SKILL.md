@@ -9,17 +9,25 @@ Autonomous experiment loop: try ideas, keep what works, discard what doesn't, ne
 
 ## Tools
 
-- **`init_experiment`** — configure session (name, metric, unit, direction). Call again to re-initialize with a new baseline when the optimization target changes.
+- **`init_experiment`** — configure session (name, metric, unit, direction, target_value). Call again to re-initialize with a new baseline when the optimization target changes.
 - **`run_experiment`** — runs command, times it, captures output.
 - **`log_experiment`** — records result. `keep` auto-commits. `discard`/`crash`/`checks_failed` → `git checkout -- .` to revert. Always include secondary `metrics` dict. Dashboard: ctrl+x.
 
+### Target Value
+
+Optionally pass `target_value` to `init_experiment` to stop when the metric reaches a specific threshold:
+- `direction: "lower"` + `target_value: 1000` → stops when metric ≤ 1000
+- `direction: "higher"` + `target_value: 0.95` → stops when metric ≥ 0.95
+
+When target is hit, the loop stops automatically. No max experiments, no time limits — target or bust.
+
 ## Setup
 
-1. Ask (or infer): **Goal**, **Command**, **Metric** (+ direction), **Files in scope**, **Constraints**.
+1. Ask (or infer): **Goal**, **Command**, **Metric** (+ direction), **Target** (optional), **Files in scope**, **Constraints**.
 2. `git checkout -b autoresearch/<goal>-<date>`
 3. Read the source files. Understand the workload deeply before writing anything.
 4. Write `autoresearch.md` and `autoresearch.sh` (see below). Commit both.
-5. `init_experiment` → run baseline → `log_experiment` → start looping immediately.
+5. `init_experiment` (with optional `target_value`) → run baseline → `log_experiment` → start looping immediately.
 
 ### `autoresearch.md`
 
@@ -33,6 +41,7 @@ This is the heart of the session. A fresh agent with no context should be able t
 
 ## Metrics
 - **Primary**: <name> (<unit>, lower/higher is better)
+- **Target**: <value or "none"> — stop when <condition>
 - **Secondary**: <name>, <name>, ...
 
 ## How to Run
