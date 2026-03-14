@@ -23,7 +23,7 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). W
 
 | Tool | Description |
 |------|-------------|
-| `init_experiment` | One-time session config — name, metric, unit, direction |
+| `init_experiment` | One-time session config — name, metric, unit, direction, target_value |
 | `run_experiment` | Runs any command, times wall-clock duration, captures output |
 | `log_experiment` | Records result, auto-commits, updates widget and dashboard |
 
@@ -78,6 +78,12 @@ The agent asks about your goal, command, metric, and files in scope — or infer
 
 The agent runs autonomously: edit → commit → `run_experiment` → `log_experiment` → keep or revert → repeat. It never stops unless interrupted.
 
+**Target-based stopping:** Optionally set a `target_value` in `init_experiment` to stop automatically when the metric reaches a threshold:
+- `direction: "lower"` + `target_value: 1000` → stops when metric ≤ 1000
+- `direction: "higher"` + `target_value: 0.95` → stops when metric ≥ 0.95
+
+When target is hit, the loop stops and the experiment is complete.
+
 Every result is appended to `autoresearch.jsonl` in your project — one line per run. This means:
 
 - **Survives restarts** — the agent can resume a session by reading the file
@@ -95,13 +101,13 @@ Every result is appended to `autoresearch.jsonl` in your project — one line pe
 
 ## Example domains
 
-| Domain | Metric | Command |
-|--------|--------|---------|
-| Test speed | seconds ↓ | `pnpm test` |
-| Bundle size | KB ↓ | `pnpm build && du -sb dist` |
-| LLM training | val_bpb ↓ | `uv run train.py` |
-| Build speed | seconds ↓ | `pnpm build` |
-| Lighthouse | perf score ↑ | `lighthouse http://localhost:3000 --output=json` |
+| Domain | Metric | Command | Target (optional) |
+|--------|--------|---------|-------------------|
+| Test speed | seconds ↓ | `pnpm test` | ≤ 30s |
+| Bundle size | KB ↓ | `pnpm build && du -sb dist` | ≤ 100KB |
+| LLM training | val_bpb ↓ | `uv run train.py` | ≤ 2.0 |
+| Build speed | seconds ↓ | `pnpm build` | ≤ 10s |
+| Lighthouse | perf score ↑ | `lighthouse http://localhost:3000 --output=json` | ≥ 95 |
 
 ---
 
@@ -110,14 +116,14 @@ Every result is appended to `autoresearch.jsonl` in your project — one line pe
 The **extension** is domain-agnostic infrastructure. The **skill** encodes domain knowledge. This separation means one extension serves unlimited domains.
 
 ```
-┌──────────────────────┐     ┌──────────────────────────┐
+┌──────────────────────┐     ┌───────────────────────────┐
 │  Extension (global)  │     │  Skill (per-domain)       │
 │                      │     │                           │
 │  run_experiment      │◄────│  command: pnpm test       │
 │  log_experiment      │     │  metric: seconds (lower)  │
 │  widget + dashboard  │     │  scope: vitest configs    │
 │                      │     │  ideas: pool, parallel…   │
-└──────────────────────┘     └──────────────────────────┘
+└──────────────────────┘     └───────────────────────────┘
 ```
 
 Two files keep the session alive across restarts and context resets:
