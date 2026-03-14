@@ -47,7 +47,7 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). W
 ## Install
 
 ```bash
-pi install https://github.com/davebcn87/pi-autoresearch
+pi install https://github.com/monotykamary/pi-autoresearch
 ```
 
 <details>
