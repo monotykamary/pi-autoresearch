@@ -1440,8 +1440,19 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           return {
             render(width: number): string[] {
               const termH = process.stdout.rows || 40;
-              // Content gets the full width — no box borders
-              const content = renderDashboardLines(state, width, theme, 0);
+              const innerW = width - 2; // space for side borders
+              const sectionW = innerW - 2; // space for padding inside borders
+
+              const border = (s: string) => theme.fg("dim", s);
+              const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
+              const row = (content: string) => {
+                const safe = truncateToWidth(content, sectionW);
+                return border("│") + pad(" " + safe, innerW) + border("│");
+              };
+              const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
+
+              // Content gets the inner width (inside borders)
+              const content = renderDashboardLines(state, sectionW, theme, 0);
 
               // Add running experiment as next row in the list
               if (runningExperiment) {
@@ -1449,16 +1460,15 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
                 const frame = SPINNER[spinnerFrame % SPINNER.length];
                 const nextIdx = state.results.length + 1;
                 content.push(
-                  truncateToWidth(
-                    `  ${theme.fg("dim", String(nextIdx).padEnd(3))}` +
-                    theme.fg("warning", `${frame} running… ${elapsed}`),
-                    width
-                  )
+                  `  ${theme.fg("dim", String(nextIdx).padEnd(3))}` +
+                  theme.fg("warning", `${frame} running… ${elapsed}`)
                 );
               }
 
               const totalRows = content.length;
-              const viewportRows = Math.max(4, termH - 4); // leave room for header/footer
+              // Reserve space for: top border + empty row + separator + footer row + bottom border
+              const chromeRows = 5;
+              const viewportRows = Math.max(4, termH - chromeRows);
 
               // Clamp scroll
               const maxScroll = Math.max(0, totalRows - viewportRows);
@@ -1467,46 +1477,48 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
               const out: string[] = [];
 
-              // Header line
+              // Title bar with border
               const titlePrefix = "🔬 autoresearch";
               const nameStr = state.name ? `: ${state.name}` : "";
-              const maxTitleLen = width - 6;
-              let title = titlePrefix + nameStr;
-              if (title.length > maxTitleLen) {
-                title = title.slice(0, maxTitleLen - 1) + "…";
-              }
-              const fillLen = Math.max(0, width - 3 - 1 - title.length - 1);
+              const titleContent = titlePrefix + nameStr;
+              const titleText = ` ${titleContent} `;
+              const titleLen = visibleWidth(titleContent) + 2;
+              const borderLen = Math.max(0, innerW - titleLen);
+              const leftBorder = Math.floor(borderLen / 2);
+              const rightBorder = borderLen - leftBorder;
+
               out.push(
-                truncateToWidth(
-                  theme.fg("borderMuted", "───") +
-                  theme.fg("accent", " " + title + " ") +
-                  theme.fg("borderMuted", "─".repeat(fillLen)),
-                  width
-                )
+                border("╭" + "─".repeat(leftBorder)) +
+                theme.fg("accent", titleText) +
+                border("─".repeat(rightBorder) + "╮")
               );
 
-              // Content rows
+              // Empty row after title
+              out.push(emptyRow());
+
+              // Content rows with side borders
               const visible = content.slice(scrollOffset, scrollOffset + viewportRows);
               for (const line of visible) {
-                out.push(truncateToWidth(line, width));
+                out.push(row(line));
               }
-              // Fill remaining viewport
+              // Fill remaining viewport with empty bordered rows
               for (let i = visible.length; i < viewportRows; i++) {
-                out.push("");
+                out.push(emptyRow());
               }
 
-              // Footer line
+              // Footer row with scroll info and help
               const scrollInfo = totalRows > viewportRows
                 ? ` ${scrollOffset + 1}-${Math.min(scrollOffset + viewportRows, totalRows)}/${totalRows}`
                 : "";
-              const helpText = ` ↑↓/j/k scroll • esc close${scrollInfo} `;
-              const footFill = Math.max(0, width - helpText.length);
+              const helpText = `↑↓/j/k scroll • esc close${scrollInfo}`;
               out.push(
-                truncateToWidth(
-                  theme.fg("borderMuted", "─".repeat(footFill)) +
-                  theme.fg("dim", helpText),
-                  width
-                )
+                border("├" + "─".repeat(innerW) + "┤")
+              );
+              out.push(
+                row(theme.fg("dim", " " + helpText))
+              );
+              out.push(
+                border("╰" + "─".repeat(innerW) + "╯")
               );
 
               return out;
@@ -1514,7 +1526,8 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
             handleInput(data: string): void {
               const termH = process.stdout.rows || 40;
-              const viewportRows = Math.max(4, termH - 4);
+              const chromeRows = 5; // must match render()
+              const viewportRows = Math.max(4, termH - chromeRows);
               const totalRows = state.results.length + (runningExperiment ? 1 : 0) + 15; // rough estimate
               const maxScroll = Math.max(0, totalRows - viewportRows);
 
