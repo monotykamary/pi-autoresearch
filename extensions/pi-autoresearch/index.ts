@@ -792,7 +792,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     resumeMsg += ` ${BENCHMARK_GUARDRAIL}`;
 
     autoResumeTurns++;
-    pi.sendUserMessage(resumeMsg);
+    pi.sendUserMessage(resumeMsg, { streamingBehavior: "followUp" });
   });
 
   // When in autoresearch mode, add a static note to the system prompt.
@@ -1610,6 +1610,12 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         return;
       }
 
+      // Already ON — don't send duplicate messages, just notify
+      if (autoresearchMode) {
+        ctx.ui.notify("Autoresearch mode already ON — use '/autoresearch off' to stop first", "info");
+        return;
+      }
+
       autoresearchMode = true;
       autoResumeTurns = 0;
 
@@ -1618,11 +1624,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
       if (hasRules) {
         ctx.ui.notify("Autoresearch mode ON — rules loaded from autoresearch.md", "info");
-        pi.sendUserMessage(`Autoresearch mode active. ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`);
+        pi.sendUserMessage(`Autoresearch mode active. ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`, { streamingBehavior: "steer" });
       } else {
         ctx.ui.notify("Autoresearch mode ON — no autoresearch.md found, setting up", "info");
         pi.sendUserMessage(
-          `Start autoresearch: ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`
+          `Start autoresearch: ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`, { streamingBehavior: "steer" }
         );
       }
     },
