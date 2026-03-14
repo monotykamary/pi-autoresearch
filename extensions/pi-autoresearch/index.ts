@@ -503,6 +503,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   let spinnerInterval: ReturnType<typeof setInterval> | null = null;
   let spinnerFrame = 0;
   const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const AUTORESEARCH_OVERLAY_MAX_HEIGHT_RATIO = 0.9;
 
   let state: ExperimentState = {
     results: [],
@@ -1421,6 +1422,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       await ctx.ui.custom<void>(
         (tui, theme, _kb, done) => {
           let scrollOffset = 0;
+          let lastSectionWidth = Math.max(10, (process.stdout.columns || 100) - 4);
           // Store tui ref so run_experiment can trigger re-renders
           overlayTui = tui;
 
@@ -1439,9 +1441,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
           return {
             render(width: number): string[] {
-              const termH = process.stdout.rows || 40;
+              const termRows = process.stdout.rows || 40;
+              const overlayRows = Math.max(10, Math.floor(termRows * AUTORESEARCH_OVERLAY_MAX_HEIGHT_RATIO));
               const innerW = width - 2; // space for side borders
               const sectionW = innerW - 2; // space for padding inside borders
+              lastSectionWidth = sectionW;
 
               const border = (s: string) => theme.fg("dim", s);
               const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
@@ -1466,9 +1470,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               }
 
               const totalRows = content.length;
-              // Reserve space for: top border + empty row + separator + footer row + bottom border
+              // Reserve space for: title border + empty row + separator + footer row + bottom border.
+              // Match overlayOptions.maxHeight so the footer/bottom border never get clipped.
               const chromeRows = 5;
-              const viewportRows = Math.max(4, termH - chromeRows);
+              const viewportRows = Math.max(4, overlayRows - chromeRows);
 
               // Clamp scroll
               const maxScroll = Math.max(0, totalRows - viewportRows);
@@ -1507,10 +1512,17 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               }
 
               // Footer row with scroll info and help
-              const scrollInfo = totalRows > viewportRows
-                ? ` ${scrollOffset + 1}-${Math.min(scrollOffset + viewportRows, totalRows)}/${totalRows}`
-                : "";
-              const helpText = `↑↓/j/k scroll • esc close${scrollInfo}`;
+              const visibleStart = totalRows === 0 ? 0 : scrollOffset + 1;
+              const visibleEnd = Math.min(scrollOffset + viewportRows, totalRows);
+              const scrollState = totalRows <= viewportRows
+                ? "all"
+                : scrollOffset === 0
+                  ? "top"
+                  : visibleEnd >= totalRows
+                    ? "bottom"
+                    : `${Math.round((visibleEnd / totalRows) * 100)}%`;
+              const scrollInfo = ` ${visibleStart}-${visibleEnd}/${totalRows} • ${scrollState}`;
+              const helpText = `↑↓/j/k scroll • u/d page • g/G top/bottom • esc close${scrollInfo}`;
               out.push(
                 border("├" + "─".repeat(innerW) + "┤")
               );
@@ -1525,10 +1537,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
             },
 
             handleInput(data: string): void {
-              const termH = process.stdout.rows || 40;
+              const termRows = process.stdout.rows || 40;
+              const overlayRows = Math.max(10, Math.floor(termRows * AUTORESEARCH_OVERLAY_MAX_HEIGHT_RATIO));
               const chromeRows = 5; // must match render()
-              const viewportRows = Math.max(4, termH - chromeRows);
-              const totalRows = state.results.length + (runningExperiment ? 1 : 0) + 15; // rough estimate
+              const viewportRows = Math.max(4, overlayRows - chromeRows);
+              const totalRows = renderDashboardLines(state, lastSectionWidth, theme, 0).length + (runningExperiment ? 1 : 0);
               const maxScroll = Math.max(0, totalRows - viewportRows);
 
               if (matchesKey(data, "escape") || data === "q") {
