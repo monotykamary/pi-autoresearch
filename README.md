@@ -27,11 +27,35 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). W
 | `run_experiment` | Runs any command, times wall-clock duration, captures output |
 | `log_experiment` | Records result, auto-commits, updates widget and dashboard |
 
+### `/autoresearch` command
+
+| Subcommand | Description |
+|------------|-------------|
+| `/autoresearch <text>` | Enter autoresearch mode. If `autoresearch.md` exists, resumes the loop with `<text>` as context. Otherwise, sets up a new session. |
+| `/autoresearch off` | Leave autoresearch mode. Stops auto-resume and clears runtime state but keeps `autoresearch.jsonl` intact. |
+| `/autoresearch clear` | Delete `autoresearch.jsonl`, reset all state, and turn autoresearch mode off. Use this for a clean start. |
+
+**Examples:**
+
+```
+/autoresearch optimize unit test runtime, monitor correctness
+/autoresearch model training, run 5 minutes of train.py and note the loss ratio as optimization target
+/autoresearch off
+/autoresearch clear
+```
+
+### Keyboard shortcuts
+
+| Shortcut | Description |
+|----------|-------------|
+| `Ctrl+X` | Toggle dashboard expand/collapse (inline widget ↔ full results table above the editor) |
+| `Ctrl+Shift+X` | Open fullscreen scrollable dashboard overlay. Navigate with `↑`/`↓`/`j`/`k`, `PageUp`/`PageDown`/`u`/`d`, `g`/`G` for top/bottom, `Escape` or `q` to close. |
+
 ### UI
 
 - **Status widget** — always visible above the editor: `🔬 autoresearch 12 runs 8 kept │ best: 42.3s`
-- **`/autoresearch`** — full results dashboard (`Ctrl+X` to toggle, `Escape` to close)
-
+- **Expanded dashboard** — `Ctrl+X` expands the widget into a full results table with columns for commit, metric, status, and description.
+- **Fullscreen overlay** — `Ctrl+Shift+X` opens a scrollable full-terminal dashboard. Shows a live spinner with elapsed time for running experiments.
 ### Skill
 
 `autoresearch-create` asks a few questions (or infers from context) about your goal, command, metric, and files in scope — then writes two files and starts the loop immediately:
@@ -134,6 +158,24 @@ autoresearch.md      — living document: objective, what's been tried, dead end
 ```
 
 A fresh agent with no memory can read these two files and continue exactly where the previous session left off.
+
+---
+
+## Configuration (optional)
+
+Create `autoresearch.config.json` in your pi session directory to customize behavior:
+
+```json
+{
+  "workingDir": "/path/to/project",
+  "maxIterations": 50
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workingDir` | string | Override the directory for all autoresearch operations — file I/O, command execution, and git. Supports absolute or relative paths (resolved against the pi session cwd). The config file itself always stays in the session cwd. Fails if the directory doesn't exist. |
+| `maxIterations` | number | Maximum experiments before auto-stopping. The agent is told to stop and won't run more experiments until a new segment is initialized. |
 
 ---
 
