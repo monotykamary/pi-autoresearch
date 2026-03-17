@@ -1,6 +1,11 @@
-# pi-autoresearch — autonomous experiment loop for pi
-
+<div align="center">
+<img src="https://github.com/user-attachments/assets/4a5c06ab-c1bb-4d9c-9173-1fd330763a59" width="250">
+  
+# pi-autoresearch
+### Autonomous experiment loop for pi
 **[Install](#install)** · **[Usage](#usage)** · **[How it works](#how-it-works)**
+
+</div>
 
 *Try an idea, measure it, keep what works, discard what doesn't, repeat forever.*
 
@@ -11,6 +16,12 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). W
 ![pi-autoresearch dashboard](pi-autoresearch.png)
 
 ---
+
+## Quick start
+
+```bash
+pi install https://github.com/davebcn87/pi-autoresearch
+```
 
 ## What's included
 
