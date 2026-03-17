@@ -628,6 +628,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   let spinnerInterval: ReturnType<typeof setInterval> | null = null;
   let spinnerFrame = 0;
   const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const AUTORESEARCH_OVERLAY_MAX_HEIGHT_RATIO = 0.9;
 
   const clearOverlay = () => {
     overlayTui = null;
