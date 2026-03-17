@@ -20,7 +20,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { truncateTail } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
-import { Text, truncateToWidth, matchesKey } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth, matchesKey, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -1693,11 +1693,27 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
             return m > 0 ? `${m}m${String(sec).padStart(2, "0")}s` : `${sec}s`;
           }
 
+          // Track last section width for totalRows calculation in handleInput
+          let lastSectionWidth = Math.max(10, (process.stdout.columns || 100) - 4);
+
           return {
             render(width: number): string[] {
-              const termH = process.stdout.rows || 40;
-              // Content gets the full width — no box borders
-              const content = renderDashboardLines(state, width, theme, 0);
+              const termRows = process.stdout.rows || 40;
+              const overlayRows = Math.max(10, Math.floor(termRows * AUTORESEARCH_OVERLAY_MAX_HEIGHT_RATIO));
+              const innerW = width - 2; // space for side borders
+              const sectionW = innerW - 2; // space for padding inside borders
+              lastSectionWidth = sectionW;
+
+              const border = (s: string) => theme.fg("dim", s);
+              const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
+              const row = (content: string) => {
+                const safe = truncateToWidth(content, sectionW);
+                return border("│") + pad(" " + safe, innerW) + border("│");
+              };
+              const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
+
+              // Content gets the inner width (inside borders)
+              const content = renderDashboardLines(state, sectionW, theme, 0);
 
               // Add running experiment as next row in the list
               if (runtime.runningExperiment) {
@@ -1705,16 +1721,16 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
                 const frame = SPINNER[spinnerFrame % SPINNER.length];
                 const nextIdx = state.results.length + 1;
                 content.push(
-                  truncateToWidth(
-                    `  ${theme.fg("dim", String(nextIdx).padEnd(3))}` +
-                    theme.fg("warning", `${frame} running… ${elapsed}`),
-                    width
-                  )
+                  `  ${theme.fg("dim", String(nextIdx).padEnd(3))}` +
+                  theme.fg("warning", `${frame} running… ${elapsed}`)
                 );
               }
 
               const totalRows = content.length;
-              const viewportRows = Math.max(4, termH - 4); // leave room for header/footer
+              // Reserve space for: title border + empty row + separator + footer row + bottom border.
+              // Match overlayOptions.maxHeight so the footer/bottom border never get clipped.
+              const chromeRows = 5;
+              const viewportRows = Math.max(4, overlayRows - chromeRows);
 
               // Clamp scroll
               const maxScroll = Math.max(0, totalRows - viewportRows);
@@ -1723,55 +1739,66 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
               const out: string[] = [];
 
-              // Header line
+              // Title bar with border
               const titlePrefix = "🔬 autoresearch";
               const nameStr = state.name ? `: ${state.name}` : "";
-              const maxTitleLen = width - 6;
-              let title = titlePrefix + nameStr;
-              if (title.length > maxTitleLen) {
-                title = title.slice(0, maxTitleLen - 1) + "…";
-              }
-              const fillLen = Math.max(0, width - 3 - 1 - title.length - 1);
+              const titleContent = titlePrefix + nameStr;
+              const titleText = ` ${titleContent} `;
+              const titleLen = visibleWidth(titleContent) + 2;
+              const borderLen = Math.max(0, innerW - titleLen);
+              const leftBorder = Math.floor(borderLen / 2);
+              const rightBorder = borderLen - leftBorder;
+
               out.push(
-                truncateToWidth(
-                  theme.fg("borderMuted", "───") +
-                  theme.fg("accent", " " + title + " ") +
-                  theme.fg("borderMuted", "─".repeat(fillLen)),
-                  width
-                )
+                border("╭" + "─".repeat(leftBorder)) +
+                theme.fg("accent", titleText) +
+                border("─".repeat(rightBorder) + "╮")
               );
 
-              // Content rows
+              // Empty row after title
+              out.push(emptyRow());
+
+              // Content rows with side borders
               const visible = content.slice(scrollOffset, scrollOffset + viewportRows);
               for (const line of visible) {
-                out.push(truncateToWidth(line, width));
+                out.push(row(line));
               }
-              // Fill remaining viewport
+              // Fill remaining viewport with empty bordered rows
               for (let i = visible.length; i < viewportRows; i++) {
-                out.push("");
+                out.push(emptyRow());
               }
 
-              // Footer line
-              const scrollInfo = totalRows > viewportRows
-                ? ` ${scrollOffset + 1}-${Math.min(scrollOffset + viewportRows, totalRows)}/${totalRows}`
-                : "";
-              const helpText = ` ↑↓/j/k scroll • esc close${scrollInfo} `;
-              const footFill = Math.max(0, width - helpText.length);
+              // Footer row with scroll info and help
+              const visibleStart = totalRows === 0 ? 0 : scrollOffset + 1;
+              const visibleEnd = Math.min(scrollOffset + viewportRows, totalRows);
+              const scrollState = totalRows <= viewportRows
+                ? "all"
+                : scrollOffset === 0
+                  ? "top"
+                  : visibleEnd >= totalRows
+                    ? "bottom"
+                    : `${Math.round((visibleEnd / totalRows) * 100)}%`;
+              const scrollInfo = ` ${visibleStart}-${visibleEnd}/${totalRows} • ${scrollState}`;
+              const helpText = `↑↓/j/k scroll • u/d page • g/G top/bottom • esc close${scrollInfo}`;
               out.push(
-                truncateToWidth(
-                  theme.fg("borderMuted", "─".repeat(footFill)) +
-                  theme.fg("dim", helpText),
-                  width
-                )
+                border("├" + "─".repeat(innerW) + "┤")
+              );
+              out.push(
+                row(theme.fg("dim", " " + helpText))
+              );
+              out.push(
+                border("╰" + "─".repeat(innerW) + "╯")
               );
 
               return out;
             },
 
             handleInput(data: string): void {
-              const termH = process.stdout.rows || 40;
-              const viewportRows = Math.max(4, termH - 4);
-              const totalRows = state.results.length + (runtime.runningExperiment ? 1 : 0) + 15; // rough estimate
+              const termRows = process.stdout.rows || 40;
+              const overlayRows = Math.max(10, Math.floor(termRows * AUTORESEARCH_OVERLAY_MAX_HEIGHT_RATIO));
+              const chromeRows = 5; // must match render()
+              const viewportRows = Math.max(4, overlayRows - chromeRows);
+              const totalRows = renderDashboardLines(state, lastSectionWidth, theme, 0).length + (runtime.runningExperiment ? 1 : 0);
               const maxScroll = Math.max(0, totalRows - viewportRows);
 
               if (matchesKey(data, "escape") || data === "q") {
