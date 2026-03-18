@@ -1326,9 +1326,21 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           chunks.push(data);
           chunksBytes += data.length;
 
+          // Evict old chunks but never mid-line: find the first newline in the
+          // oldest surviving chunk and trim up to (and including) it so the
+          // buffer always starts at a line boundary. This also avoids splitting
+          // multi-byte UTF-8 characters that straddle chunk boundaries.
           while (chunksBytes > maxChunksBytes && chunks.length > 1) {
             const removed = chunks.shift()!;
             chunksBytes -= removed.length;
+          }
+          if (chunksBytes > maxChunksBytes && chunks.length === 1) {
+            const buf = chunks[0];
+            const nlIdx = buf.indexOf(0x0a); // '\n'
+            if (nlIdx !== -1 && nlIdx < buf.length - 1) {
+              chunks[0] = buf.subarray(nlIdx + 1);
+              chunksBytes = chunks[0].length;
+            }
           }
 
           chunksGeneration++;
