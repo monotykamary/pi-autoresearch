@@ -18,12 +18,22 @@ import type {
   ExtensionContext,
   Theme,
 } from "@mariozechner/pi-coding-agent";
-import { truncateTail } from "@mariozechner/pi-coding-agent";
+import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text, truncateToWidth, matchesKey, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
+
+// ---------------------------------------------------------------------------
+// Experiment output limits (sent to LLM — keep small to save context)
+// ---------------------------------------------------------------------------
+const EXPERIMENT_MAX_LINES = 10;
+const EXPERIMENT_MAX_BYTES = 4 * 1024; // 4KB
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +49,8 @@ interface ExperimentResult {
   timestamp: number;
   /** Segment index — increments on each config header. Current segment = highest. */
   segment: number;
+  /** Session-level confidence score at the time this result was logged. null if insufficient data. */
+  confidence: number | null;
 }
 
 interface MetricDef {
@@ -60,6 +72,8 @@ interface ExperimentState {
   currentSegment: number;
   /** Maximum number of experiments before auto-stopping. null = unlimited. */
   maxExperiments: number | null;
+  /** Current session confidence score (best improvement / noise floor). null if insufficient data. */
+  confidence: number | null;
 }
 
 interface RunDetails {
@@ -75,11 +89,19 @@ interface RunDetails {
   checksTimedOut: boolean;
   checksOutput: string;
   checksDuration: number;
+  /** Metrics parsed from METRIC lines in output. null if none found. */
+  parsedMetrics: Record<string, number> | null;
+  /** Primary metric value extracted from parsedMetrics (matching metricName). null if not found. */
+  parsedPrimary: number | null;
+  /** Name of the primary metric (for display) */
+  metricName: string;
+  metricUnit: string;
 }
 
 interface LogDetails {
   experiment: ExperimentResult;
   state: ExperimentState;
+  wallClockSeconds: number | null;
 }
 
 interface AutoresearchRuntime {
@@ -89,6 +111,7 @@ interface AutoresearchRuntime {
   experimentsThisSession: number;
   autoResumeTurns: number;
   lastRunChecks: { pass: boolean; output: string; duration: number } | null;
+  lastRunDuration: number | null;
   runningExperiment: { startedAt: number; command: string } | null;
   state: ExperimentState;
 }
@@ -166,6 +189,39 @@ const LogParams = Type.Object({
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Prefix for structured metric output lines: `METRIC name=value` */
+const METRIC_LINE_PREFIX = "METRIC";
+
+/**
+ * Parse structured METRIC lines from command output.
+ * Format: METRIC name=value (one per line)
+ * Example:
+ *   METRIC total_µs=15200
+ *   METRIC compile_µs=4200
+ *
+ * Names must be word chars, dots, or µ (rejects `=` and other specials).
+ * Values must be finite numbers (rejects Infinity, NaN, hex, etc.).
+ * Duplicate names: last occurrence wins (allows scripts to refine values).
+ * Returns a Map preserving insertion order of first occurrence per key.
+ */
+/** Metric names that could cause prototype pollution if used as object keys */
+const DENIED_METRIC_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
+function parseMetricLines(output: string): Map<string, number> {
+  const metrics = new Map<string, number>();
+  const regex = new RegExp(`^${METRIC_LINE_PREFIX}\\s+([\\w.µ]+)=(\\S+)\\s*$`, "gm");
+  let match;
+  while ((match = regex.exec(output)) !== null) {
+    const name = match[1];
+    if (DENIED_METRIC_NAMES.has(name)) continue;
+    const value = Number(match[2]);
+    if (Number.isFinite(value)) {
+      metrics.set(name, value);
+    }
+  }
+  return metrics;
+}
+
 /** Format a number with comma-separated thousands: 15586 → "15,586" */
 function commas(n: number): string {
   const s = String(Math.round(n));
@@ -195,12 +251,131 @@ function formatNum(value: number | null, unit: string): string {
   return fmtNum(value, 2) + u;
 }
 
+/** Lazy temp file allocator — returns the same path on subsequent calls */
+function createTempFileAllocator(): () => string {
+  let p: string | undefined;
+  return () => {
+    if (!p) {
+      const id = randomBytes(8).toString("hex");
+      p = path.join(tmpdir(), `pi-experiment-${id}.log`);
+    }
+    return p;
+  };
+}
+
+/** Format elapsed milliseconds as "Xm XXs" or "XXs" */
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+/** Kill a process tree (best effort, tries process group first) */
+function killTree(pid: number): void {
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // Process may have already exited
+    }
+  }
+}
+
+/**
+ * Check if a command's primary purpose is running autoresearch.sh.
+ *
+ * Strategy: strip common harmless prefixes (env vars, env/time/nice wrappers)
+ * then check that the core command is autoresearch.sh invoked via a known
+ * pattern. Rejects chaining tricks like "evil.py; autoresearch.sh" because
+ * we require autoresearch.sh to be the *first* real command.
+ */
+function isAutoresearchShCommand(command: string): boolean {
+  let cmd = command.trim();
+
+  // Strip leading env variable assignments: FOO=bar BAZ="qux" ...
+  cmd = cmd.replace(/^(?:\w+=\S*\s+)+/, "");
+
+  // Strip known harmless command wrappers (env, time, nice, nohup) repeatedly
+  // Allows flags and their numeric values: e.g. "nice -n 10 time env ..."
+  let prev: string;
+  do {
+    prev = cmd;
+    cmd = cmd.replace(/^(?:env|time|nice|nohup)(?:\s+-\S+(?:\s+\d+)?)*\s+/, "");
+  } while (cmd !== prev);
+
+  // Now the core command must be autoresearch.sh via a known invocation:
+  //   autoresearch.sh
+  //   ./autoresearch.sh
+  //   /path/to/autoresearch.sh
+  //   bash [-flags] autoresearch.sh
+  //   bash [-flags] ./autoresearch.sh
+  //   bash [-flags] /path/to/autoresearch.sh
+  return /^(?:(?:bash|sh|source)\s+(?:-\w+\s+)*)?(?:\.\/|\/[\w/.-]*\/)?autoresearch\.sh(?:\s|$)/.test(cmd);
+}
+
 function isBetter(
   current: number,
   best: number,
   direction: "lower" | "higher"
 ): boolean {
   return direction === "lower" ? current < best : current > best;
+}
+
+/** Compute the median of a numeric array (returns 0 for empty arrays) */
+function sortedMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+/**
+ * Compute confidence score for the best improvement vs. session noise floor.
+ *
+ * Uses Median Absolute Deviation (MAD) of all metric values in the current
+ * segment as a robust noise estimator. Returns `|best_delta| / MAD`, where
+ * best_delta is the improvement of the best kept metric over baseline.
+ *
+ * Returns null when there are fewer than 3 data points (insufficient data)
+ * or when MAD is 0 (all values identical — no measurable noise).
+ */
+function computeConfidence(
+  results: ExperimentResult[],
+  segment: number,
+  direction: "lower" | "higher"
+): number | null {
+  const cur = currentResults(results, segment).filter((r) => r.metric > 0);
+  if (cur.length < 3) return null;
+
+  const values = cur.map((r) => r.metric);
+  const median = sortedMedian(values);
+  const deviations = values.map((v) => Math.abs(v - median));
+  const mad = sortedMedian(deviations);
+
+  if (mad === 0) return null;
+
+  const baseline = findBaselineMetric(results, segment);
+  if (baseline === null) return null;
+
+  // Find best kept metric in current segment
+  let bestKept: number | null = null;
+  for (const r of cur) {
+    if (r.status === "keep" && r.metric > 0) {
+      if (bestKept === null || isBetter(r.metric, bestKept, direction)) {
+        bestKept = r.metric;
+      }
+    }
+  }
+  if (bestKept === null || bestKept === baseline) return null;
+
+  const delta = Math.abs(bestKept - baseline);
+  return delta / mad;
 }
 
 /** Get results in the current segment only */
@@ -329,6 +504,7 @@ function createExperimentState(): ExperimentState {
     name: null,
     currentSegment: 0,
     maxExperiments: null,
+    confidence: null,
   };
 }
 
@@ -340,6 +516,7 @@ function createSessionRuntime(): AutoresearchRuntime {
     experimentsThisSession: 0,
     autoResumeTurns: 0,
     lastRunChecks: null,
+    lastRunDuration: null,
     runningExperiment: null,
     state: createExperimentState(),
   };
@@ -412,10 +589,18 @@ function renderDashboardLines(
   }
 
   // Runs summary
+  const confSuffix = st.confidence !== null
+    ? (() => {
+        const confStr = st.confidence!.toFixed(1);
+        const confColor: Parameters<typeof th.fg>[0] = st.confidence! >= 2.0 ? "success" : st.confidence! >= 1.0 ? "warning" : "error";
+        return `  ${th.fg(confColor, `(conf: ${confStr}×)`)}`;
+      })()
+    : "";
   lines.push(
     truncateToWidth(
       `  ${th.fg("muted", "Runs:")} ${th.fg("text", String(st.results.length))}` +
         `  ${th.fg("success", `${kept} kept`)}` +
+        confSuffix +
         (discarded > 0 ? `  ${th.fg("warning", `${discarded} discarded`)}` : "") +
         (crashed > 0 ? `  ${th.fg("error", `${crashed} crashed`)}` : "") +
         (checksFailed > 0 ? `  ${th.fg("error", `${checksFailed} checks failed`)}` : ""),
@@ -427,7 +612,7 @@ function renderDashboardLines(
   const baselineSuffix = baselineRunNumber === null ? "" : ` #${baselineRunNumber}`;
   lines.push(
     truncateToWidth(
-      `  ${th.fg("muted", "Baseline:")} ${th.fg("dim", `★ ${st.metricName}: ${formatNum(baseline, st.metricUnit)}${baselineSuffix}`)}`,
+      `  ${th.fg("muted", "Baseline:")} ${th.fg("muted", `★ ${st.metricName}: ${formatNum(baseline, st.metricUnit)}${baselineSuffix}`)}`,
       width
     )
   );
@@ -446,14 +631,18 @@ function renderDashboardLines(
 
     lines.push(truncateToWidth(progressLine, width));
 
-    // Progress secondary metrics on next line with deltas
+    // Progress secondary metrics — wrap into lines that fit width, indented
     if (st.secondaryMetrics.length > 0) {
+      const indent = "            "; // 12 chars to align under progress value
+      const maxLineW = width - 2 - indent.length; // 2 for leading "  "
+
+      // Build individually-colored parts
       const secParts: string[] = [];
       for (const sm of st.secondaryMetrics) {
         const val = bestSecondary[sm.name];
         const bv = baselineSec[sm.name];
         if (val !== undefined) {
-          let part = `${sm.name}: ${formatNum(val, sm.unit)}`;
+          let part = th.fg("muted", `${sm.name}: ${formatNum(val, sm.unit)}`);
           if (bv !== undefined && bv !== 0 && val !== bv) {
             const p = ((val - bv) / bv) * 100;
             const s = p > 0 ? "+" : "";
@@ -463,13 +652,26 @@ function renderDashboardLines(
           secParts.push(part);
         }
       }
+
+      // Flow-wrap parts into lines
       if (secParts.length > 0) {
-        lines.push(
-          truncateToWidth(
-            `  ${th.fg("dim", "          ")}${th.fg("muted", secParts.join("  "))}`,
-            width
-          )
-        );
+        let curLine = "";
+        let curVisW = 0;
+        for (const part of secParts) {
+          const partVisW = visibleWidth(part);
+          const sep = curLine ? "  " : "";
+          if (curLine && curVisW + sep.length + partVisW > maxLineW) {
+            lines.push(truncateToWidth(`  ${th.fg("dim", indent)}${curLine}`, width));
+            curLine = part;
+            curVisW = partVisW;
+          } else {
+            curLine += sep + part;
+            curVisW += sep.length + partVisW;
+          }
+        }
+        if (curLine) {
+          lines.push(truncateToWidth(`  ${th.fg("dim", indent)}${curLine}`, width));
+        }
       }
     }
   }
@@ -486,14 +688,21 @@ function renderDashboardLines(
     visibleRows.some((r) => (r.metrics ?? {})[sm.name] !== undefined)
   );
 
-  // Column definitions
+  // Column definitions — guarantee 25% of width for description
   const col = { idx: 3, commit: 8, primary: 11, status: 15 };
   const secColWidth = 11;
-  const totalSecWidth = secMetrics.length * secColWidth;
-  const descW = Math.max(
-    10,
-    width - col.idx - col.commit - col.primary - totalSecWidth - col.status - 6
-  );
+  const minDescW = Math.max(10, Math.floor(width * 0.25));
+  const fixedW = col.idx + col.commit + col.primary + col.status + 6;
+  const availableForSec = width - fixedW - minDescW;
+
+  // Drop secondary columns from the right until they fit
+  let visibleSecMetrics = secMetrics;
+  while (visibleSecMetrics.length > 0 && visibleSecMetrics.length * secColWidth > availableForSec) {
+    visibleSecMetrics = visibleSecMetrics.slice(0, -1);
+  }
+
+  const totalSecWidth = visibleSecMetrics.length * secColWidth;
+  const descW = Math.max(minDescW, width - fixedW - totalSecWidth);
 
   // Table header — primary metric name bolded with ★
   let headerLine =
@@ -501,7 +710,7 @@ function renderDashboardLines(
     `${th.fg("muted", "commit".padEnd(col.commit))}` +
     `${th.fg("warning", th.bold(("★ " + st.metricName).slice(0, col.primary - 1).padEnd(col.primary)))}`;
 
-  for (const sm of secMetrics) {
+  for (const sm of visibleSecMetrics) {
     headerLine += th.fg(
       "muted",
       sm.name.slice(0, secColWidth - 1).padEnd(secColWidth)
@@ -556,7 +765,7 @@ function renderDashboardLines(
     let primaryColor: Parameters<typeof th.fg>[0] = isOld ? "dim" : "text";
     if (!isOld) {
       if (isBaseline) {
-        primaryColor = "muted"; // baseline row
+        primaryColor = "text"; // baseline row — normal text
       } else if (
         baselinePrimary !== null &&
         r.status === "keep" &&
@@ -578,9 +787,9 @@ function renderDashboardLines(
       `${th.fg(isOld ? "dim" : "accent", commitStr)}` +
       `${th.fg(primaryColor, isOld ? primaryStr.padEnd(col.primary) : th.bold(primaryStr.padEnd(col.primary)))}`;
 
-    // Secondary metrics
+    // Secondary metrics (only visible columns)
     const rowMetrics = r.metrics ?? {};
-    for (const sm of secMetrics) {
+    for (const sm of visibleSecMetrics) {
       const val = rowMetrics[sm.name];
       if (val !== undefined) {
         const secStr = formatNum(val, sm.unit);
@@ -588,7 +797,7 @@ function renderDashboardLines(
         if (!isOld) {
           const bv = baselineSecondary[sm.name];
           if (isBaseline) {
-            secColor = "muted"; // baseline row
+            secColor = "text"; // baseline row — normal text
           } else if (bv !== undefined && bv !== 0) {
             secColor = val <= bv ? "success" : "error";
           }
@@ -665,6 +874,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   const reconstructState = (ctx: ExtensionContext) => {
     const runtime = getRuntime(ctx);
     runtime.lastRunChecks = null;
+    runtime.lastRunDuration = null;
     runtime.runningExperiment = null;
     runtime.lastAutoResumeTime = 0;
     runtime.experimentsThisSession = 0;
@@ -694,7 +904,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               if (entry.metricUnit !== undefined) state.metricUnit = entry.metricUnit;
               if (entry.bestDirection) state.bestDirection = entry.bestDirection;
               // Increment segment (first config = 0, second = 1, etc.)
-              if (state.results.length > 0) segment++;
+              if (state.results.length > 0) {
+                segment++;
+                // Reset per-segment tracking (mirrors live reinit behavior)
+                state.secondaryMetrics = [];
+              }
               state.currentSegment = segment;
               continue;
             }
@@ -708,6 +922,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               description: entry.description ?? "",
               timestamp: entry.timestamp ?? 0,
               segment,
+              confidence: entry.confidence ?? null,
             });
 
             // Register secondary metrics
@@ -729,6 +944,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         if (state.results.length > 0) {
           loadedFromJsonl = true;
           state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
+          state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
         }
       }
     } catch {
@@ -752,6 +968,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           }
           for (const r of state.results) {
             if (!r.metrics) r.metrics = {};
+            if (r.confidence === undefined) r.confidence = null;
+          }
+          if (state.confidence === undefined) {
+            state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
           }
         }
       }
@@ -873,6 +1093,14 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           parts.push(theme.fg(deltaColor, ` (${sign}${pct.toFixed(1)}%)`));
         }
 
+        // Show confidence score
+        if (state.confidence !== null) {
+          const confStr = state.confidence.toFixed(1);
+          const confColor: Parameters<typeof theme.fg>[0] = state.confidence >= 2.0 ? "success" : state.confidence >= 1.0 ? "warning" : "error";
+          parts.push(theme.fg("dim", " │ "));
+          parts.push(theme.fg(confColor, `conf: ${confStr}×`));
+        }
+
         // Show secondary metrics with delta %
         if (state.secondaryMetrics.length > 0) {
           for (const sm of state.secondaryMetrics) {
@@ -880,14 +1108,14 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
             const bv = baselineSec[sm.name];
             if (val !== undefined) {
               parts.push(theme.fg("dim", "  "));
-              let secText = `${sm.name}: ${formatNum(val, sm.unit)}`;
+              // Color value and delta separately to avoid color bleed
+              parts.push(theme.fg("muted", `${sm.name}: ${formatNum(val, sm.unit)}`));
               if (bv !== undefined && bv !== 0 && val !== bv) {
                 const p = ((val - bv) / bv) * 100;
                 const s = p > 0 ? "+" : "";
                 const c = val <= bv ? "success" : "error";
-                secText += theme.fg(c, ` ${s}${p.toFixed(1)}%`);
+                parts.push(theme.fg(c, ` ${s}${p.toFixed(1)}%`));
               }
-              parts.push(theme.fg("muted", secText));
             }
           }
         }
@@ -1041,10 +1269,14 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       if (params.direction === "lower" || params.direction === "higher") {
         state.bestDirection = params.direction;
       }
-      // Reset results for new baseline segment
-      state.results = [];
+      // Start a new segment — keep history for dashboard, but reset baseline tracking.
+      // Old results remain accessible (filtered by segment in rendering).
+      if (isReinit) {
+        state.currentSegment++;
+      }
       state.bestMetric = null;
       state.secondaryMetrics = [];
+      state.confidence = null;
 
       // Read max experiments from config file (config always in ctx.cwd)
       state.maxExperiments = readMaxExperiments(ctx.cwd);
@@ -1110,12 +1342,13 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     name: "run_experiment",
     label: "Run Experiment",
     description:
-      "Run a shell command as an experiment. Times wall-clock duration, captures output, detects pass/fail via exit code. Use for any autoresearch experiment.",
+      `Run a shell command as an experiment. Times wall-clock duration, captures output, detects pass/fail via exit code. Output is truncated to last ${EXPERIMENT_MAX_LINES} lines or ${EXPERIMENT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Use for any autoresearch experiment.`,
     promptSnippet:
       "Run a timed experiment command (captures duration, output, exit code)",
     promptGuidelines: [
       "Use run_experiment instead of bash when running experiment commands — it handles timing and output capture automatically.",
       "After run_experiment, always call log_experiment to record the result.",
+      "If the benchmark script outputs structured METRIC lines (e.g. 'METRIC total_µs=15200'), run_experiment will parse them automatically and suggest exact values for log_experiment. Use these parsed values directly instead of extracting them manually from the output.",
     ],
     parameters: RunParams,
 
@@ -1146,33 +1379,203 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
       const timeout = (params.timeout_seconds ?? 600) * 1000;
 
+      // Guard: if autoresearch.sh exists, only allow running it
+      const autoresearchShPath = path.join(workDir, "autoresearch.sh");
+      if (fs.existsSync(autoresearchShPath) && !isAutoresearchShCommand(params.command)) {
+        return {
+          content: [{
+            type: "text",
+            text: `❌ autoresearch.sh exists — you must run it instead of a custom command.\n\nFound: ${autoresearchShPath}\nYour command: ${params.command}\n\nUse: run_experiment({ command: "bash autoresearch.sh" }) or run_experiment({ command: "./autoresearch.sh" })`,
+          }],
+          details: {
+            command: params.command,
+            exitCode: null,
+            durationSeconds: 0,
+            passed: false,
+            crashed: true,
+            timedOut: false,
+            tailOutput: "",
+            checksPass: null,
+            checksTimedOut: false,
+            checksOutput: "",
+            checksDuration: 0,
+          } as RunDetails,
+        };
+      }
+
       runtime.runningExperiment = { startedAt: Date.now(), command: params.command };
       updateWidget(ctx);
       if (overlayTui) overlayTui.requestRender();
 
-      onUpdate?.({
-        content: [{ type: "text", text: `Running: ${params.command}` }],
-        details: { phase: "running" },
-      });
-
       const t0 = Date.now();
 
-      let result;
-      try {
-        result = await pi.exec("bash", ["-c", params.command], {
-          signal,
-          timeout,
+      // Spawn the process directly (like the bash tool) for streaming output
+      const getTempFile = createTempFileAllocator();
+      const { exitCode, killed: timedOut, output, tempFilePath: streamTempFile, actualTotalBytes } = await new Promise<{
+        exitCode: number | null;
+        killed: boolean;
+        output: string;
+        tempFilePath: string | undefined;
+        actualTotalBytes: number;
+      }>((resolve, reject) => {
+        let processTimedOut = false;
+
+        const child = spawn("bash", ["-c", params.command], {
           cwd: workDir,
+          detached: true,
+          stdio: ["ignore", "pipe", "pipe"],
         });
-      } finally {
+
+        // Rolling buffer for tail truncation (keep 2x what we need)
+        const chunks: Buffer[] = [];
+        let chunksBytes = 0;
+        const maxChunksBytes = DEFAULT_MAX_BYTES * 2;
+
+        // Temp file for full output when it overflows
+        let tempFilePath: string | undefined;
+        let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
+        let totalBytes = 0;
+
+        // Cache for Buffer.concat — only rebuild when chunks change
+        let chunksGeneration = 0;
+        let cachedGeneration = -1;
+        let cachedText = "";
+
+        function getBufferText(): string {
+          if (cachedGeneration === chunksGeneration) return cachedText;
+          cachedText = Buffer.concat(chunks).toString("utf-8");
+          cachedGeneration = chunksGeneration;
+          return cachedText;
+        }
+
+        // Timer interval — update every second with elapsed time + tail output
+        const timerInterval = setInterval(() => {
+          if (!onUpdate) return;
+          const elapsed = formatElapsed(Date.now() - t0);
+          const trunc = truncateTail(getBufferText(), {
+            maxLines: DEFAULT_MAX_LINES,
+            maxBytes: DEFAULT_MAX_BYTES,
+          });
+          onUpdate({
+            content: [{ type: "text", text: trunc.content || "" }],
+            details: {
+              phase: "running",
+              elapsed,
+              truncation: trunc.truncated ? trunc : undefined,
+              fullOutputPath: tempFilePath,
+            },
+          });
+        }, 1000);
+
+        const handleData = (data: Buffer) => {
+          totalBytes += data.length;
+
+          // Start writing to temp file once we exceed the threshold
+          if (totalBytes > DEFAULT_MAX_BYTES && !tempFilePath) {
+            tempFilePath = getTempFile();
+            tempFileStream = createWriteStream(tempFilePath);
+            for (const chunk of chunks) {
+              tempFileStream.write(chunk);
+            }
+          }
+
+          if (tempFileStream) {
+            tempFileStream.write(data);
+          }
+
+          // Keep rolling buffer of recent data
+          chunks.push(data);
+          chunksBytes += data.length;
+
+          // Evict old chunks, then trim the first surviving chunk to a line
+          // boundary. This avoids splitting multi-byte UTF-8 characters that
+          // straddle chunk boundaries (which would produce U+FFFD on decode).
+          while (chunksBytes > maxChunksBytes && chunks.length > 1) {
+            const removed = chunks.shift()!;
+            chunksBytes -= removed.length;
+          }
+          // Trim first surviving chunk to a newline boundary
+          if (chunks.length > 0 && chunksBytes > maxChunksBytes) {
+            const buf = chunks[0];
+            const nlIdx = buf.indexOf(0x0a); // '\n'
+            if (nlIdx !== -1 && nlIdx < buf.length - 1) {
+              chunks[0] = buf.subarray(nlIdx + 1);
+              chunksBytes -= nlIdx + 1;
+            }
+          }
+
+          chunksGeneration++;
+        };
+
+        if (child.stdout) child.stdout.on("data", handleData);
+        if (child.stderr) child.stderr.on("data", handleData);
+
+        // Timeout
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        if (timeout > 0) {
+          timeoutHandle = setTimeout(() => {
+            processTimedOut = true;
+            if (child.pid) killTree(child.pid);
+          }, timeout);
+        }
+
+        // Abort signal — kill immediately if pid exists, otherwise queue for spawn.
+        // Using child.kill() as fallback ensures the signal is never silently swallowed.
+        const onAbort = () => {
+          if (child.pid) killTree(child.pid);
+          else {
+            // pid not yet assigned — try child.kill() which works without pid,
+            // and also queue killTree for spawn in case child.kill() isn't enough
+            // to clean up the full process tree.
+            child.kill();
+            child.once("spawn", () => { if (child.pid) killTree(child.pid); });
+          }
+        };
+        if (signal) {
+          if (signal.aborted) {
+            onAbort();
+          } else {
+            signal.addEventListener("abort", onAbort, { once: true });
+          }
+        }
+
+        child.on("error", (err) => {
+          clearInterval(timerInterval);
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+          if (signal) signal.removeEventListener("abort", onAbort);
+          if (tempFileStream) tempFileStream.end();
+          reject(err);
+        });
+
+        child.on("close", (code) => {
+          clearInterval(timerInterval);
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+          if (signal) signal.removeEventListener("abort", onAbort);
+          if (tempFileStream) tempFileStream.end();
+
+          if (signal?.aborted) {
+            reject(new Error("aborted"));
+            return;
+          }
+
+          const fullBuffer = Buffer.concat(chunks);
+          resolve({
+            exitCode: code,
+            killed: processTimedOut,
+            output: fullBuffer.toString("utf-8"),
+            tempFilePath,
+            actualTotalBytes: totalBytes,
+          });
+        });
+      }).finally(() => {
         runtime.runningExperiment = null;
         updateWidget(ctx);
         if (overlayTui) overlayTui.requestRender();
-      }
+      });
 
       const durationSeconds = (Date.now() - t0) / 1000;
-      const output = (result.stdout + "\n" + result.stderr).trim();
-      const benchmarkPassed = result.code === 0 && !result.killed;
+      runtime.lastRunDuration = durationSeconds;
+      const benchmarkPassed = exitCode === 0 && !timedOut;
 
       // Run backpressure checks if benchmark passed and checks file exists
       let checksPass: boolean | null = null;
@@ -1204,21 +1607,51 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       // Store checks result for log_experiment gate
       runtime.lastRunChecks = checksPass !== null ? { pass: checksPass, output: checksOutput, duration: checksDuration } : null;
 
-      // Overall pass: benchmark must pass AND checks must pass (if they ran)
       const passed = benchmarkPassed && (checksPass === null || checksPass);
+
+      // Reuse streaming temp file if it exists, otherwise create one for large output
+      let fullOutputPath: string | undefined = streamTempFile;
+      const totalLines = output.split("\n").length;
+      if (!fullOutputPath && (actualTotalBytes > EXPERIMENT_MAX_BYTES || totalLines > EXPERIMENT_MAX_LINES)) {
+        fullOutputPath = getTempFile();
+        fs.writeFileSync(fullOutputPath, output);
+      }
+
+      // Wider truncation for TUI display (details.tailOutput)
+      const displayTruncation = truncateTail(output, {
+        maxLines: DEFAULT_MAX_LINES,
+        maxBytes: DEFAULT_MAX_BYTES,
+      });
+
+      // Tight truncation for LLM context (10 lines / 4KB)
+      const llmTruncation = truncateTail(output, {
+        maxLines: EXPERIMENT_MAX_LINES,
+        maxBytes: EXPERIMENT_MAX_BYTES,
+      });
+
+      // Parse structured METRIC lines from output
+      const parsedMetricMap = parseMetricLines(output);
+      const parsedMetrics = parsedMetricMap.size > 0
+        ? Object.fromEntries(parsedMetricMap)
+        : null;
+      const parsedPrimary = parsedMetricMap.get(state.metricName) ?? null;
 
       const details: RunDetails = {
         command: params.command,
-        exitCode: result.code,
+        exitCode,
         durationSeconds,
         passed,
         crashed: !passed,
-        timedOut: !!result.killed,
-        tailOutput: output.split("\n").slice(-80).join("\n"),
+        timedOut,
+        tailOutput: displayTruncation.content,
         checksPass,
         checksTimedOut,
         checksOutput: checksOutput.split("\n").slice(-80).join("\n"),
         checksDuration,
+        parsedMetrics,
+        parsedPrimary,
+        metricName: state.metricName,
+        metricUnit: state.metricUnit,
       };
 
       // Build LLM response
@@ -1226,7 +1659,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       if (details.timedOut) {
         text += `⏰ TIMEOUT after ${durationSeconds.toFixed(1)}s\n`;
       } else if (!benchmarkPassed) {
-        text += `💥 FAILED (exit code ${result.code}) in ${durationSeconds.toFixed(1)}s\n`;
+        text += `💥 FAILED (exit code ${exitCode}) in ${durationSeconds.toFixed(1)}s\n`;
       } else if (checksTimedOut) {
         text += `✅ Benchmark PASSED in ${durationSeconds.toFixed(1)}s\n`;
         text += `⏰ CHECKS TIMEOUT (autoresearch.checks.sh) after ${checksDuration.toFixed(1)}s\n`;
@@ -1246,20 +1679,47 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         text += `📊 Current best ${state.metricName}: ${formatNum(state.bestMetric, state.metricUnit)}\n`;
       }
 
-      text += `\nLast 80 lines of output:\n${details.tailOutput}`;
+      // Show parsed METRIC lines to the LLM
+      if (parsedMetrics) {
+        const secondary = Object.entries(parsedMetrics).filter(([k]) => k !== state.metricName);
+
+        // Human-readable summary
+        text += `\n📐 Parsed metrics:`;
+        if (parsedPrimary !== null) {
+          text += ` ★ ${state.metricName}=${formatNum(parsedPrimary, state.metricUnit)}`;
+        }
+        for (const [name, value] of secondary) {
+          // Infer unit from name suffix for display
+          const sm = state.secondaryMetrics.find((m) => m.name === name);
+          const unit = sm?.unit ?? "";
+          text += ` ${name}=${formatNum(value, unit)}`;
+        }
+
+        // Machine-ready values for log_experiment (raw numbers, not formatted)
+        text += `\nUse these values directly in log_experiment (metric: ${parsedPrimary ?? "?"}, metrics: {${secondary.map(([k, v]) => `"${k}": ${v}`).join(", ")}})\n`;
+      }
+
+      text += `\n${llmTruncation.content}`;
+
+      if (llmTruncation.truncated) {
+        if (llmTruncation.truncatedBy === "lines") {
+          text += `\n\n[Showing last ${llmTruncation.outputLines} of ${llmTruncation.totalLines} lines.`;
+        } else {
+          text += `\n\n[Showing last ${llmTruncation.outputLines} lines (${formatSize(EXPERIMENT_MAX_BYTES)} limit).`;
+        }
+        if (fullOutputPath) {
+          text += ` Full output: ${fullOutputPath}`;
+        }
+        text += `]`;
+      }
 
       if (checksPass === false) {
         text += `\n\n── Checks output (last 80 lines) ──\n${details.checksOutput}`;
       }
 
-      const truncation = truncateTail(text, {
-        maxLines: 150,
-        maxBytes: 40000,
-      });
-
       return {
-        content: [{ type: "text", text: truncation.content }],
-        details,
+        content: [{ type: "text", text }],
+        details: { ...details, truncation: llmTruncation.truncated ? llmTruncation : undefined, fullOutputPath },
       };
     },
 
@@ -1273,70 +1733,114 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     },
 
     renderResult(result, { expanded, isPartial }, theme) {
+      const PREVIEW_LINES = 5;
+
       if (isPartial) {
-        return new Text(
-          theme.fg("warning", "⏳ Running experiment..."),
-          0,
-          0
-        );
+        // Streaming: show elapsed timer + tail of output
+        const d = result.details as { phase?: string; elapsed?: string; truncation?: any; fullOutputPath?: string } | undefined;
+        const elapsed = d?.elapsed ?? "";
+        const outputText = result.content[0]?.type === "text" ? result.content[0].text : "";
+
+        let text = theme.fg("warning", `⏳ Running${elapsed ? ` ${elapsed}` : ""}…`);
+
+        // Always show tail of streaming output (like bash tool shows preview lines)
+        if (outputText) {
+          const lines = outputText.split("\n");
+          const maxLines = expanded ? 20 : PREVIEW_LINES;
+          const tail = lines.slice(-maxLines).join("\n");
+          if (tail.trim()) {
+            text += "\n" + theme.fg("dim", tail);
+          }
+        }
+
+        return new Text(text, 0, 0);
       }
 
-      const d = result.details as RunDetails | undefined;
+      const d = result.details as (RunDetails & { truncation?: any; fullOutputPath?: string }) | undefined;
       if (!d) {
         const t = result.content[0];
         return new Text(t?.type === "text" ? t.text : "", 0, 0);
       }
 
+      // Helper: append tail output preview or full output
+      const appendOutput = (text: string, output: string): string => {
+        if (!output) return text;
+        const lines = output.split("\n");
+        if (expanded) {
+          text += "\n" + theme.fg("dim", output.slice(-2000));
+        } else {
+          const tail = lines.slice(-PREVIEW_LINES).join("\n");
+          if (tail.trim()) {
+            const hidden = lines.length - PREVIEW_LINES;
+            if (hidden > 0) {
+              text += "\n" + theme.fg("muted", `… ${hidden} more lines`);
+            }
+            text += "\n" + theme.fg("dim", tail);
+          }
+        }
+        return text;
+      };
+
       if (d.timedOut) {
-        let text = theme.fg(
-          "error",
-          `⏰ TIMEOUT ${d.durationSeconds.toFixed(1)}s`
-        );
-        if (expanded) text += "\n" + theme.fg("dim", d.tailOutput.slice(-500));
+        let text = theme.fg("error", `⏰ TIMEOUT ${d.durationSeconds.toFixed(1)}s`);
+        text = appendOutput(text, d.tailOutput);
         return new Text(text, 0, 0);
       }
 
+      // Helper: format parsed primary metric suffix (empty string if not available)
+      const parsedSuffix = d.parsedPrimary !== null
+        ? theme.fg("accent", `, ${d.metricName}: ${formatNum(d.parsedPrimary, d.metricUnit)}`)
+        : "";
+
       if (d.checksTimedOut) {
-        // Benchmark passed but checks timed out
         let text =
-          theme.fg("success", `✅ ${d.durationSeconds.toFixed(1)}s`) +
+          theme.fg("success", `✅ wall: ${d.durationSeconds.toFixed(1)}s`) +
+          parsedSuffix +
           theme.fg("error", ` ⏰ checks timeout ${d.checksDuration.toFixed(1)}s`);
-        if (expanded) {
-          text += "\n" + theme.fg("dim", d.checksOutput.slice(-500));
-        }
+        text = appendOutput(text, d.checksOutput);
         return new Text(text, 0, 0);
       }
 
       if (d.checksPass === false) {
-        // Benchmark passed but checks failed
         let text =
-          theme.fg("success", `✅ ${d.durationSeconds.toFixed(1)}s`) +
+          theme.fg("success", `✅ wall: ${d.durationSeconds.toFixed(1)}s`) +
+          parsedSuffix +
           theme.fg("error", ` 💥 checks failed ${d.checksDuration.toFixed(1)}s`);
-        if (expanded) {
-          text += "\n" + theme.fg("dim", d.checksOutput.slice(-500));
-        }
+        text = appendOutput(text, d.checksOutput);
         return new Text(text, 0, 0);
       }
 
       if (d.crashed) {
-        let text = theme.fg(
-          "error",
-          `💥 FAIL exit=${d.exitCode} ${d.durationSeconds.toFixed(1)}s`
-        );
-        if (expanded) text += "\n" + theme.fg("dim", d.tailOutput.slice(-500));
+        let text = theme.fg("error", `💥 FAIL exit=${d.exitCode} ${d.durationSeconds.toFixed(1)}s`) + parsedSuffix;
+        text = appendOutput(text, d.tailOutput);
         return new Text(text, 0, 0);
       }
 
-      let text =
-        theme.fg("success", "✅ ") +
-        theme.fg("accent", `${d.durationSeconds.toFixed(1)}s`);
+      let text = theme.fg("success", "✅ ");
+
+      // Show wall-clock and parsed primary metric together
+      const parts: string[] = [`wall: ${d.durationSeconds.toFixed(1)}s`];
+      if (d.parsedPrimary !== null) {
+        parts.push(`${d.metricName}: ${formatNum(d.parsedPrimary, d.metricUnit)}`);
+      }
+      text += theme.fg("accent", parts.join(", "));
 
       if (d.checksPass === true) {
         text += theme.fg("success", ` ✓ checks ${d.checksDuration.toFixed(1)}s`);
       }
 
-      if (expanded) {
-        text += "\n" + theme.fg("dim", d.tailOutput.slice(-1000));
+      if (d.truncation?.truncated && d.fullOutputPath) {
+        text += theme.fg("warning", " (truncated)");
+      }
+
+      text = appendOutput(text, d.tailOutput);
+
+      if (expanded && d.truncation?.truncated && d.fullOutputPath) {
+        if (d.truncation.truncatedBy === "lines") {
+          text += "\n" + theme.fg("warning", `[Truncated: showing ${d.truncation.outputLines} of ${d.truncation.totalLines} lines. Full output: ${d.fullOutputPath}]`);
+        } else {
+          text += "\n" + theme.fg("warning", `[Truncated: ${d.truncation.outputLines} lines shown (${formatSize(EXPERIMENT_MAX_BYTES)} limit). Full output: ${d.fullOutputPath}]`);
+        }
       }
 
       return new Text(text, 0, 0);
@@ -1358,6 +1862,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       "Always call log_experiment after run_experiment to record the result.",
       "log_experiment automatically runs git add -A && git commit on 'keep', and auto-reverts code changes on 'discard'/'crash'/'checks_failed' (autoresearch files are preserved). Do NOT commit or revert manually.",
       "Use status 'keep' if the PRIMARY metric improved. 'discard' if worse or unchanged. 'crash' if it failed. Secondary metrics are for monitoring — they almost never affect keep/discard. Only discard a primary improvement if a secondary metric degraded catastrophically, and explain why in the description.",
+      "log_experiment reports a confidence score after 3+ runs (best improvement as a multiple of the noise floor). ≥2.0× = likely real, <1.0× = within noise. If confidence is below 1.0×, consider re-running the same experiment to confirm before keeping. The score is advisory — it never auto-discards.",
       "If you discover complex but promising optimizations you won't pursue immediately, append them as bullet points to autoresearch.ideas.md. Don't let good ideas get lost.",
     ],
     parameters: LogParams,
@@ -1426,6 +1931,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         description: params.description,
         timestamp: Date.now(),
         segment: state.currentSegment,
+        confidence: null,
       };
 
       state.results.push(experiment);
@@ -1446,6 +1952,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
       // Baseline = first run in current segment
       state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
+
+      // Compute confidence score (best improvement as multiple of noise floor)
+      state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
+      experiment.confidence = state.confidence;
 
       // Build response text
       const segmentCount = currentResults(state.results, state.currentSegment).length;
@@ -1479,6 +1989,18 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           parts.push(part);
         }
         text += `\nSecondary: ${parts.join("  ")}`;
+      }
+
+      // Show confidence score
+      if (state.confidence !== null) {
+        const confStr = state.confidence.toFixed(1);
+        if (state.confidence >= 2.0) {
+          text += `\n📊 Confidence: ${confStr}× noise floor — improvement is likely real`;
+        } else if (state.confidence >= 1.0) {
+          text += `\n📊 Confidence: ${confStr}× noise floor — improvement is above noise but marginal`;
+        } else {
+          text += `\n⚠️ Confidence: ${confStr}× noise floor — improvement is within noise. Consider re-running to confirm before keeping.`;
+        }
       }
 
       text += `\n(${segmentCount} experiments`;
@@ -1557,8 +2079,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       }
 
       // Clear running experiment and checks state (log_experiment consumes the run)
+      const wallClockSeconds = runtime.lastRunDuration;
       runtime.runningExperiment = null;
       runtime.lastRunChecks = null;
+      runtime.lastRunDuration = null;
 
       // Check if max experiments limit reached
       const limitReached = state.maxExperiments !== null && segmentCount >= state.maxExperiments;
@@ -1577,6 +2101,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         details: {
           experiment: { ...experiment, metrics: { ...experiment.metrics } },
           state: cloneExperimentState(state),
+          wallClockSeconds,
         } as LogDetails,
       };
     },
@@ -1615,14 +2140,32 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         theme.fg(color, `${icon} `) +
         theme.fg("accent", `#${s.results.length}`);
 
-
+      // Show wall-clock and primary metric together
+      const metricParts: string[] = [];
+      if (d.wallClockSeconds !== null && d.wallClockSeconds !== undefined) {
+        metricParts.push(`wall: ${d.wallClockSeconds.toFixed(1)}s`);
+      }
+      if (exp.metric > 0) {
+        metricParts.push(`${s.metricName}: ${formatNum(exp.metric, s.metricUnit)}`);
+      }
+      if (metricParts.length > 0) {
+        text += theme.fg("dim", " (") + theme.fg("warning", metricParts.join(theme.fg("dim", ", "))) + theme.fg("dim", ")");
+      }
 
       text += " " + theme.fg("muted", exp.description);
 
+      // Show best metric for context (overall best, not just this run)
       if (s.bestMetric !== null) {
+        // Find the actual best kept metric in the current segment
+        let best = s.bestMetric;
+        for (const r of s.results) {
+          if (r.segment === s.currentSegment && r.status === "keep" && r.metric > 0) {
+            if (isBetter(r.metric, best, s.bestDirection)) best = r.metric;
+          }
+        }
         text +=
           theme.fg("dim", " │ ") +
-          theme.fg("warning", theme.bold(`★ ${formatNum(s.bestMetric, s.metricUnit)}`));
+          theme.fg("warning", `★ best: ${formatNum(best, s.metricUnit)}`);
       }
 
       // Show secondary metrics inline
@@ -1686,13 +2229,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
             spinnerFrame = (spinnerFrame + 1) % SPINNER.length;
             if (runtime.runningExperiment) tui.requestRender();
           }, 80);
-
-          function formatElapsed(ms: number): string {
-            const s = Math.floor(ms / 1000);
-            const m = Math.floor(s / 60);
-            const sec = s % 60;
-            return m > 0 ? `${m}m${String(sec).padStart(2, "0")}s` : `${sec}s`;
-          }
 
           // Track last section width for totalRows calculation in handleInput
           let lastSectionWidth = Math.max(10, (process.stdout.columns || 100) - 4);

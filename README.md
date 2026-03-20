@@ -64,7 +64,8 @@ pi install https://github.com/davebcn87/pi-autoresearch
 
 ### UI
 
-- **Status widget** — always visible above the editor: `🔬 autoresearch 12 runs 8 kept │ best: 42.3s`
+- **Status widget** — always visible above the editor: `🔬 autoresearch 12 runs 8 kept │ ★ total_µs: 15,200 (-12.3%) │ conf: 2.1×`
+- **Confidence score** — after 3+ runs, shows how the best improvement compares to the session noise floor. ≥2.0× (green) = likely real, 1.0–2.0× (yellow) = above noise but marginal, <1.0× (red) = within noise.
 - **Expanded dashboard** — `Ctrl+X` expands the widget into a full results table with columns for commit, metric, status, and description.
 - **Fullscreen overlay** — `Ctrl+Shift+X` opens a scrollable full-terminal dashboard. Shows a live spinner with elapsed time for running experiments.
 ### Skill
@@ -187,6 +188,26 @@ Create `autoresearch.config.json` in your pi session directory to customize beha
 |-------|------|-------------|
 | `workingDir` | string | Override the directory for all autoresearch operations — file I/O, command execution, and git. Supports absolute or relative paths (resolved against the pi session cwd). The config file itself always stays in the session cwd. Fails if the directory doesn't exist. |
 | `maxIterations` | number | Maximum experiments before auto-stopping. The agent is told to stop and won't run more experiments until a new segment is initialized. |
+
+---
+
+## Confidence scoring
+
+After 3+ experiments in a session, pi-autoresearch computes a **confidence score** — how the best improvement compares to the session's noise floor. This helps distinguish real gains from benchmark jitter, especially on noisy signals like ML training, Lighthouse scores, or flaky benchmarks.
+
+**How it works:**
+
+- Uses [Median Absolute Deviation (MAD)](https://en.wikipedia.org/wiki/Median_absolute_deviation) of all metric values in the current segment as a robust noise estimator.
+- Confidence = `|best_improvement| / MAD`. A score of 2.0× means the best improvement is twice the noise floor.
+- Shown in the widget, expanded dashboard, and `log_experiment` output.
+- Persisted to `autoresearch.jsonl` on each result for post-hoc analysis.
+- **Advisory only** — never auto-discards. The agent is guided to re-run experiments when confidence is low, but the final keep/discard decision stays with the agent.
+
+| Confidence | Color | Meaning |
+|-----------|-------|---------|
+| ≥ 2.0× | 🟢 green | Improvement is likely real |
+| 1.0–2.0× | 🟡 yellow | Above noise but marginal |
+| < 1.0× | 🔴 red | Within noise — consider re-running to confirm |
 
 ---
 
