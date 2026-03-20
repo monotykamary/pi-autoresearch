@@ -1802,17 +1802,17 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               const totalRows = renderDashboardLines(state, lastSectionWidth, theme, 0).length + (runtime.runningExperiment ? 1 : 0);
               const maxScroll = Math.max(0, totalRows - viewportRows);
 
-              if (matchesKey(data, "escape") || data === "q") {
+              if (matchesKey(data, "tui.escape") || data === "q") {
                 done(undefined);
                 return;
               }
-              if (matchesKey(data, "up") || data === "k") {
+              if (matchesKey(data, "tui.up") || data === "k") {
                 scrollOffset = Math.max(0, scrollOffset - 1);
-              } else if (matchesKey(data, "down") || data === "j") {
+              } else if (matchesKey(data, "tui.down") || data === "j") {
                 scrollOffset = Math.min(maxScroll, scrollOffset + 1);
-              } else if (matchesKey(data, "pageUp") || data === "u") {
+              } else if (matchesKey(data, "tui.pageUp") || data === "u") {
                 scrollOffset = Math.max(0, scrollOffset - viewportRows);
-              } else if (matchesKey(data, "pageDown") || data === "d") {
+              } else if (matchesKey(data, "tui.pageDown") || data === "d") {
                 scrollOffset = Math.min(maxScroll, scrollOffset + viewportRows);
               } else if (data === "g") {
                 scrollOffset = 0;
