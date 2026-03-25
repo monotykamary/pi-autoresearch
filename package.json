@@ -6,6 +6,11 @@
     "pi-package"
   ],
   "license": "MIT",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
   "pi": {
     "extensions": [
       "./extensions"
@@ -13,6 +18,10 @@
     "skills": [
       "./skills"
     ]
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
