@@ -7,6 +7,23 @@ description: Set up and run an autonomous experiment loop for any optimization t
 
 Autonomous experiment loop: try ideas, keep what works, discard what doesn't, never stop.
 
+## When to Use (Scope)
+
+**Use autoresearch ONLY for:**
+- Long-horizon optimization tasks with **verifiable metrics** (performance, accuracy, bundle size, latency, throughput, etc.)
+- Tasks where you can measure improvement quantitatively
+- Optimization loops that may run 10+ iterations automatically
+
+**Do NOT use autoresearch for:**
+- General development or feature implementation without a metric
+- One-off commits or quick fixes
+- Exploratory coding without a measurable target
+- Tasks where success is subjective or binary (works/doesn't work)
+- Refactoring without performance goals
+- Bug fixes (unless optimizing a reproduction benchmark)
+
+If there's no clear metric to optimize, use regular `bash` and `edit` tools instead.
+
 ## Tools
 
 - **`init_experiment`** — configure session (name, metric, unit, direction, target_value). Call again to re-initialize with a new baseline when the optimization target changes.

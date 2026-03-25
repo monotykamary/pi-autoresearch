@@ -968,6 +968,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   const MAX_AUTORESUME_TURNS = 20;
   const BENCHMARK_GUARDRAIL =
     "Be careful not to overfit to the benchmarks and do not cheat on the benchmarks.";
+  const SCOPE_GUARDRAIL =
+    "Autoresearch is ONLY for long-horizon optimization tasks with verifiable metrics (e.g., performance, accuracy, bundle size). " +
+    "Do NOT use autoresearch for: general development, one-off commits, exploratory coding without a metric, or tasks without a measurable optimization target. " +
+    "If there's no clear metric to optimize, use regular tools instead.";
 
   const runtimeStore = createRuntimeStore();
   const getSessionKey = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
@@ -1361,8 +1365,9 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
     let extra =
       "\n\n## Autoresearch Mode (ACTIVE)" +
-      "\nYou are in autoresearch mode. Optimize the primary metric through an autonomous experiment loop." +
-      "\nUse init_experiment, run_experiment, and log_experiment tools. NEVER STOP until interrupted." +
+      "\nYou are in autoresearch mode for LONG-HORIZON OPTIMIZATION with verifiable metrics." +
+      "\nPurpose: Optimize a primary metric through an autonomous experiment loop. " +
+      "Use init_experiment, run_experiment, and log_experiment tools. NEVER STOP until interrupted." +
       `\nExperiment rules: ${mdPath} — read this file at the start of every session and after compaction.`;
     
     // Add worktree info
@@ -1372,6 +1377,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     
     extra +=
       "\nWrite promising but deferred optimizations as bullet points to autoresearch.ideas.md — don't let good ideas get lost." +
+      `\n${SCOPE_GUARDRAIL}` +
       `\n${BENCHMARK_GUARDRAIL}` +
       "\nIf the user sends a follow-on message while an experiment is running, finish the current run_experiment + log_experiment cycle first, then address their message in the next iteration.";
 
@@ -2655,11 +2661,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
       if (hasRules) {
         ctx.ui.notify("Autoresearch mode ON — rules loaded from autoresearch.md", "info");
-        pi.sendUserMessage(`Autoresearch mode active. ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`);
+        pi.sendUserMessage(`Autoresearch mode active. ${trimmedArgs} ${SCOPE_GUARDRAIL} ${BENCHMARK_GUARDRAIL}`);
       } else {
         ctx.ui.notify("Autoresearch mode ON — no autoresearch.md found, setting up", "info");
         pi.sendUserMessage(
-          `Start autoresearch: ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`
+          `Start autoresearch: ${trimmedArgs} ${SCOPE_GUARDRAIL} ${BENCHMARK_GUARDRAIL}`
         );
       }
     },
