@@ -2211,6 +2211,21 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       }
       text += `)`;
 
+      // Persist to autoresearch.jsonl FIRST (always, regardless of status)
+      // This ensures it gets staged in the git commit that follows
+      try {
+        const jsonlPath = path.join(workDir, "autoresearch.jsonl");
+        const jsonlEntry: Record<string, unknown> = {
+          run: state.results.length,
+          ...experiment,
+        };
+        // Only write asi if present (keep lines compact when no ASI)
+        if (!mergedASI) delete jsonlEntry.asi;
+        fs.appendFileSync(jsonlPath, JSON.stringify(jsonlEntry) + "\n");
+      } catch (e) {
+        text += `\n⚠️ Failed to write autoresearch.jsonl: ${e instanceof Error ? e.message : String(e)}`;
+      }
+
       // Auto-commit only on keep — discards/crashes get reverted anyway
       if (params.status === "keep") {
         try {
@@ -2255,20 +2270,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         } catch (e) {
           text += `\n⚠️ Git commit error: ${e instanceof Error ? e.message : String(e)}`;
         }
-      }
-
-      // Persist to autoresearch.jsonl (always, regardless of status)
-      try {
-        const jsonlPath = path.join(workDir, "autoresearch.jsonl");
-        const jsonlEntry: Record<string, unknown> = {
-          run: state.results.length,
-          ...experiment,
-        };
-        // Only write asi if present (keep lines compact when no ASI)
-        if (!mergedASI) delete jsonlEntry.asi;
-        fs.appendFileSync(jsonlPath, JSON.stringify(jsonlEntry) + "\n");
-      } catch (e) {
-        text += `\n⚠️ Failed to write autoresearch.jsonl: ${e instanceof Error ? e.message : String(e)}`;
       }
 
       // Auto-revert on discard/crash/checks_failed — revert all files except autoresearch session files
