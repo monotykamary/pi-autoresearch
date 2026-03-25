@@ -268,6 +268,23 @@ The test suite includes:
 
 ---
 
+## Divergence from Upstream
+
+This fork (`monotykamary/pi-autoresearch`) adds the following on top of [upstream](https://github.com/davebcn87/pi-autoresearch):
+
+| Feature | Description |
+|---------|-------------|
+| **Git worktree isolation** | Each session creates an isolated worktree at `autoresearch/<session-id>/` — keeps main repo clean, experiments run in isolation |
+| **Test suite + CI** | Vitest tests (unit + integration), GitHub Actions workflow |
+| **target_value** | Optional threshold to auto-stop when metric reaches goal |
+| **Bordered fullscreen overlay** | `Ctrl+Shift+X` opens a scrollable full-terminal dashboard with borders |
+| **UI fixes** | Footer visibility, keybinding namespace migration, streaming behavior fixes |
+| **Scope guardrails** | Documentation to prevent general-purpose misuse |
+
+Features like ASI, statistical confidence scoring, metric parsing, runtime state refactor, and `max_experiments` came from upstream via regular merges.
+
+---
+
 ## License
 
 MIT
