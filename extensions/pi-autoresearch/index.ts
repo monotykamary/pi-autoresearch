@@ -125,6 +125,8 @@ interface AutoresearchRuntime {
   lastRunDuration: number | null;
   runningExperiment: { startedAt: number; command: string } | null;
   state: ExperimentState;
+  /** Path to the session-specific git worktree for isolation, or null if not using worktree */
+  worktreeDir: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -428,8 +430,15 @@ function readMaxExperiments(cwd: string): number | null {
  * Resolve the effective working directory.
  * Reads workingDir from autoresearch.config.json in ctxCwd.
  * Returns ctxCwd if not set. Supports relative (resolved against ctxCwd) and absolute paths.
+ * 
+ * When in autoresearch mode with an active worktree, returns the worktree directory.
  */
-function resolveWorkDir(ctxCwd: string): string {
+function resolveWorkDir(ctxCwd: string, runtime?: AutoresearchRuntime): string {
+  // Worktree takes precedence when in autoresearch mode
+  if (runtime?.worktreeDir) {
+    return runtime.worktreeDir;
+  }
+  
   const config = readConfig(ctxCwd);
   if (!config.workingDir) return ctxCwd;
   return path.isAbsolute(config.workingDir)
@@ -438,11 +447,122 @@ function resolveWorkDir(ctxCwd: string): string {
 }
 
 /**
+ * Create a git worktree for autoresearch isolation.
+ * Worktree is created at: <ctxCwd>/autoresearch/<sessionId>/
+ * Returns the worktree path or null if creation failed.
+ */
+async function createAutoresearchWorktree(
+  pi: ExtensionAPI,
+  ctxCwd: string,
+  sessionId: string
+): Promise<string | null> {
+  const worktreeName = `autoresearch/${sessionId}`;
+  const worktreePath = path.join(ctxCwd, worktreeName);
+  
+  // Check if worktree already exists
+  try {
+    const result = await pi.exec("git", ["worktree", "list", "--porcelain"], { cwd: ctxCwd, timeout: 10000 });
+    if (result.stdout.includes(worktreePath)) {
+      // Worktree already exists, just ensure the directory is valid
+      if (fs.existsSync(worktreePath)) {
+        return worktreePath;
+      }
+      // Worktree entry exists but directory is missing — prune and recreate
+      await pi.exec("git", ["worktree", "prune"], { cwd: ctxCwd, timeout: 5000 });
+    }
+  } catch {
+    // Git worktree list failed, proceed to try creation
+  }
+  
+  // Create the autoresearch directory if it doesn't exist
+  const autoresearchDir = path.join(ctxCwd, "autoresearch");
+  if (!fs.existsSync(autoresearchDir)) {
+    fs.mkdirSync(autoresearchDir, { recursive: true });
+  }
+  
+  // Create a branch for this worktree (autoresearch/session-id)
+  const branchName = `autoresearch/${sessionId}`;
+  
+  try {
+    // Check if branch exists
+    const branchResult = await pi.exec("git", ["branch", "--list", branchName], { cwd: ctxCwd, timeout: 5000 });
+    if (!branchResult.stdout.trim()) {
+      // Create branch from current HEAD
+      const createResult = await pi.exec("git", ["checkout", "-b", branchName], { cwd: ctxCwd, timeout: 10000 });
+      if (createResult.code !== 0) {
+        return null;
+      }
+    }
+    
+    // Create worktree
+    const worktreeResult = await pi.exec(
+      "git",
+      ["worktree", "add", worktreePath, branchName],
+      { cwd: ctxCwd, timeout: 30000 }
+    );
+    
+    if (worktreeResult.code !== 0) {
+      return null;
+    }
+    
+    return worktreePath;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove a git worktree and its associated branch.
+ */
+async function removeAutoresearchWorktree(
+  pi: ExtensionAPI,
+  ctxCwd: string,
+  worktreePath: string
+): Promise<void> {
+  try {
+    // Remove the worktree
+    await pi.exec("git", ["worktree", "remove", "--force", worktreePath], { cwd: ctxCwd, timeout: 30000 });
+    
+    // Extract branch name from path (autoresearch/<sessionId>)
+    const branchName = path.relative(ctxCwd, worktreePath);
+    
+    // Try to delete the branch (may fail if it doesn't exist, that's ok)
+    await pi.exec("git", ["branch", "-D", branchName], { cwd: ctxCwd, timeout: 10000 });
+    
+    // Clean up empty autoresearch directory
+    const autoresearchDir = path.join(ctxCwd, "autoresearch");
+    try {
+      if (fs.existsSync(autoresearchDir)) {
+        const entries = fs.readdirSync(autoresearchDir);
+        if (entries.length === 0) {
+          fs.rmdirSync(autoresearchDir);
+        }
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+  } catch {
+    // Ignore errors during cleanup
+  }
+}
+
+/**
+ * Get the worktree path for display purposes (relative if inside project).
+ */
+function getDisplayWorktreePath(ctxCwd: string, worktreePath: string | null): string | null {
+  if (!worktreePath) return null;
+  if (worktreePath.startsWith(ctxCwd)) {
+    return path.relative(ctxCwd, worktreePath) || ".";
+  }
+  return worktreePath;
+}
+
+/**
  * Validate that the resolved working directory exists.
  * Returns an error message if it doesn't exist, or null if OK.
  */
-function validateWorkDir(ctxCwd: string): string | null {
-  const workDir = resolveWorkDir(ctxCwd);
+function validateWorkDir(ctxCwd: string, runtime?: AutoresearchRuntime): string | null {
+  const workDir = resolveWorkDir(ctxCwd, runtime);
   if (workDir === ctxCwd) return null;
   try {
     const stat = fs.statSync(workDir);
@@ -536,6 +656,7 @@ function createSessionRuntime(): AutoresearchRuntime {
     lastRunDuration: null,
     runningExperiment: null,
     state: createExperimentState(),
+    worktreeDir: null,
   };
 }
 
@@ -905,7 +1026,8 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     let state = runtime.state;
 
     // Resolve effective working directory (config stays in ctx.cwd, files in workDir)
-    const workDir = resolveWorkDir(ctx.cwd);
+    // When in autoresearch mode with a worktree, use the worktree directory
+    const workDir = resolveWorkDir(ctx.cwd, runtime);
 
     // Primary: read from autoresearch.jsonl (alongside autoresearch.md/sh)
     const jsonlPath = path.join(workDir, "autoresearch.jsonl");
@@ -1047,7 +1169,12 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
         const hintText = " ctrl+x collapse • ctrl+shift+x fullscreen ";
         const labelPrefix = "🔬 autoresearch";
-        const nameStr = state.name ? `: ${state.name}` : "";
+        let nameStr = state.name ? `: ${state.name}` : "";
+        // Add worktree indicator to title
+        if (runtime.worktreeDir) {
+          const displayPath = getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir);
+          nameStr += ` [${displayPath}]`;
+        }
         // 3 leading dashes + space + label + space + fill + hint
         const maxLabelLen = width - 3 - 2 - hintText.length - 1;
         let label = labelPrefix + nameStr;
@@ -1142,6 +1269,12 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           }
         }
 
+        // Show worktree indicator
+        if (runtime.worktreeDir) {
+          const displayPath = getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir);
+          parts.push(theme.fg("dim", ` │ 📁${displayPath}`));
+        }
+
         if (state.name) {
           parts.push(theme.fg("dim", ` │ ${state.name}`));
         }
@@ -1196,7 +1329,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
     // Auto-continue: send a message to resume the loop
     // The agent reads autoresearch.md on startup which has all context
-    const workDir = resolveWorkDir(ctx.cwd);
+    const workDir = resolveWorkDir(ctx.cwd, runtime);
     const ideasPath = path.join(workDir, "autoresearch.ideas.md");
     const hasIdeas = fs.existsSync(ideasPath);
 
@@ -1216,19 +1349,28 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     const runtime = getRuntime(ctx);
     if (!runtime.autoresearchMode) return;
 
-    const workDir = resolveWorkDir(ctx.cwd);
+    const workDir = resolveWorkDir(ctx.cwd, runtime);
     const mdPath = path.join(workDir, "autoresearch.md");
     const ideasPath = path.join(workDir, "autoresearch.ideas.md");
     const hasIdeas = fs.existsSync(ideasPath);
 
     const checksPath = path.join(workDir, "autoresearch.checks.sh");
     const hasChecks = fs.existsSync(checksPath);
+    
+    const worktreeDisplay = getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir);
 
     let extra =
       "\n\n## Autoresearch Mode (ACTIVE)" +
       "\nYou are in autoresearch mode. Optimize the primary metric through an autonomous experiment loop." +
       "\nUse init_experiment, run_experiment, and log_experiment tools. NEVER STOP until interrupted." +
-      `\nExperiment rules: ${mdPath} — read this file at the start of every session and after compaction.` +
+      `\nExperiment rules: ${mdPath} — read this file at the start of every session and after compaction.`;
+    
+    // Add worktree info
+    if (runtime.worktreeDir) {
+      extra += `\n📁 Isolated worktree: ${worktreeDisplay} — all experiments run here, main working directory stays clean.`;
+    }
+    
+    extra +=
       "\nWrite promising but deferred optimizations as bullet points to autoresearch.ideas.md — don't let good ideas get lost." +
       `\n${BENCHMARK_GUARDRAIL}` +
       "\nIf the user sends a follow-on message while an experiment is running, finish the current run_experiment + log_experiment cycle first, then address their message in the next iteration.";
@@ -1274,8 +1416,8 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
 
-      // Validate working directory exists
-      const workDirError = validateWorkDir(ctx.cwd);
+      // Validate working directory exists (worktree takes precedence if active)
+      const workDirError = validateWorkDir(ctx.cwd, runtime);
       if (workDirError) {
         return {
           content: [{ type: "text", text: `❌ ${workDirError}` }],
@@ -1304,7 +1446,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       state.maxExperiments = readMaxExperiments(ctx.cwd);
 
       // Write config header to jsonl (append for re-init, create for first)
-      const workDir = resolveWorkDir(ctx.cwd);
+      const workDir = resolveWorkDir(ctx.cwd, runtime);
       try {
         const jsonlPath = path.join(workDir, "autoresearch.jsonl");
         const config = JSON.stringify({
@@ -1379,15 +1521,15 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
 
-      // Validate working directory exists
-      const workDirError = validateWorkDir(ctx.cwd);
+      // Validate working directory exists (worktree takes precedence if active)
+      const workDirError = validateWorkDir(ctx.cwd, runtime);
       if (workDirError) {
         return {
           content: [{ type: "text", text: `❌ ${workDirError}` }],
           details: {},
         };
       }
-      const workDir = resolveWorkDir(ctx.cwd);
+      const workDir = resolveWorkDir(ctx.cwd, runtime);
 
       // Block if max experiments limit already reached
       if (state.maxExperiments !== null) {
@@ -1895,15 +2037,15 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
 
-      // Validate working directory exists
-      const workDirError = validateWorkDir(ctx.cwd);
+      // Validate working directory exists (worktree takes precedence if active)
+      const workDirError = validateWorkDir(ctx.cwd, runtime);
       if (workDirError) {
         return {
           content: [{ type: "text", text: `❌ ${workDirError}` }],
           details: {},
         };
       }
-      const workDir = resolveWorkDir(ctx.cwd);
+      const workDir = resolveWorkDir(ctx.cwd, runtime);
       const secondaryMetrics = params.metrics ?? {};
 
       // Gate: prevent "keep" when last run's checks failed
@@ -2238,7 +2380,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
       if (state.results.length === 0) {
-        if (!runtime.autoresearchMode && !fs.existsSync(path.join(resolveWorkDir(ctx.cwd), "autoresearch.md"))) {
+        if (!runtime.autoresearchMode && !fs.existsSync(path.join(resolveWorkDir(ctx.cwd, runtime), "autoresearch.md"))) {
           ctx.ui.notify("No experiments yet — run /autoresearch to get started", "info");
         } else {
           ctx.ui.notify("No experiments yet", "info");
@@ -2440,18 +2582,32 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       }
 
       if (command === "off") {
+        // Remove worktree if one exists
+        if (runtime.worktreeDir) {
+          await removeAutoresearchWorktree(pi, ctx.cwd, runtime.worktreeDir);
+          runtime.worktreeDir = null;
+        }
+        
         runtime.autoresearchMode = false;
         runtime.lastAutoResumeTime = 0;
         runtime.autoResumeTurns = 0;
         runtime.experimentsThisSession = 0;
         runtime.lastRunChecks = null;
         runtime.runningExperiment = null;
-        ctx.ui.notify("Autoresearch mode OFF", "info");
+        ctx.ui.notify("Autoresearch mode OFF — worktree removed", "info");
         return;
       }
 
       if (command === "clear") {
-        const jsonlPath = path.join(resolveWorkDir(ctx.cwd), "autoresearch.jsonl");
+        const workDir = resolveWorkDir(ctx.cwd, runtime);
+        const jsonlPath = path.join(workDir, "autoresearch.jsonl");
+        
+        // Remove worktree if one exists
+        if (runtime.worktreeDir) {
+          await removeAutoresearchWorktree(pi, ctx.cwd, runtime.worktreeDir);
+          runtime.worktreeDir = null;
+        }
+        
         runtime.autoresearchMode = false;
         runtime.dashboardExpanded = false;
         runtime.lastAutoResumeTime = 0;
@@ -2481,7 +2637,20 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       runtime.autoresearchMode = true;
       runtime.autoResumeTurns = 0;
 
-      const mdPath = path.join(resolveWorkDir(ctx.cwd), "autoresearch.md");
+      // Create worktree for isolation if not already exists
+      if (!runtime.worktreeDir) {
+        const worktreePath = await createAutoresearchWorktree(pi, ctx.cwd, getSessionKey(ctx));
+        if (worktreePath) {
+          runtime.worktreeDir = worktreePath;
+          const displayPath = getDisplayWorktreePath(ctx.cwd, worktreePath);
+          ctx.ui.notify(`Created autoresearch worktree: ${displayPath}`, "info");
+        } else {
+          ctx.ui.notify("Failed to create autoresearch worktree, using main working directory", "warning");
+        }
+      }
+
+      const workDir = resolveWorkDir(ctx.cwd, runtime);
+      const mdPath = path.join(workDir, "autoresearch.md");
       const hasRules = fs.existsSync(mdPath);
 
       if (hasRules) {

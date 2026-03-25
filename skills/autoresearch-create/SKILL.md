@@ -24,10 +24,39 @@ When target is hit, the loop stops automatically. No max experiments, no time li
 ## Setup
 
 1. Ask (or infer): **Goal**, **Command**, **Metric** (+ direction), **Target** (optional), **Files in scope**, **Constraints**.
-2. `git checkout -b autoresearch/<goal>-<date>`
+2. `/autoresearch <goal description>` — this automatically creates:
+   - A git branch `autoresearch/<session-id>`
+   - A git worktree at `autoresearch/<session-id>/` inside the project
+   - All experiments run in this isolated worktree, leaving your main working directory clean
 3. Read the source files. Understand the workload deeply before writing anything.
-4. Write `autoresearch.md` and `autoresearch.sh` (see below). Commit both.
+4. Write `autoresearch.md` and `autoresearch.sh` inside the worktree. Commit both.
 5. `init_experiment` (with optional `target_value`) → run baseline → `log_experiment` → start looping immediately.
+
+### Worktree Pattern
+
+Autoresearch automatically uses **git worktrees** for isolation:
+
+```
+project/
+├── src/                    # Your main code (stays clean)
+├── autoresearch/
+│   └── <session-id>/      # Isolated worktree for experiments
+│       ├── autoresearch.md
+│       ├── autoresearch.sh
+│       └── autoresearch.jsonl
+└── ...
+```
+
+**Benefits:**
+- Main working directory stays clean — no pollution from failed experiments
+- Side commits accumulate in the worktree without affecting your main branch
+- Easy to merge back successful changes, discard the rest
+- Multiple autoresearch sessions can run in parallel (different worktrees)
+
+**Lifecycle:**
+1. `/autoresearch optimize X` → creates worktree automatically
+2. Experiments run inside `autoresearch/<session-id>/`
+3. `/autoresearch off` or `/autoresearch clear` → removes worktree and branch
 
 ### `autoresearch.md`
 

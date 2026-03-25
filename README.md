@@ -108,11 +108,17 @@ Then `/reload` in pi.
 /skill:autoresearch-create
 ```
 
-The agent asks about your goal, command, metric, and files in scope — or infers them from context. It then creates a branch, writes `autoresearch.md` and `autoresearch.sh`, runs the baseline, and starts looping immediately.
+The agent asks about your goal, command, metric, and files in scope — or infers them from context. It then:
+
+1. **Creates an isolated worktree** at `autoresearch/<session-id>/`
+2. Writes `autoresearch.md` and `autoresearch.sh` inside the worktree
+3. Runs the baseline and starts the experiment loop immediately
+
+Your main working directory stays clean — all experiments run in the isolated worktree.
 
 ### 2. The loop
 
-The agent runs autonomously: edit → commit → `run_experiment` → `log_experiment` → keep or revert → repeat. It never stops unless interrupted.
+The agent runs autonomously in the worktree: edit → commit → `run_experiment` → `log_experiment` → keep or revert → repeat. It never stops unless interrupted.
 
 **Target-based stopping:** Optionally set a `target_value` in `init_experiment` to stop automatically when the metric reaches a threshold:
 - `direction: "lower"` + `target_value: 1000` → stops when metric ≤ 1000
@@ -120,16 +126,24 @@ The agent runs autonomously: edit → commit → `run_experiment` → `log_exper
 
 When target is hit, the loop stops and the experiment is complete.
 
-Every result is appended to `autoresearch.jsonl` in your project — one line per run. This means:
+Every result is appended to `autoresearch.jsonl` in the worktree — one line per run. This means:
 
 - **Survives restarts** — the agent can resume a session by reading the file
 - **Survives context resets** — `autoresearch.md` captures what's been tried so a fresh agent has full context
 - **Human readable** — open it anytime to see the full history
-- **Branch-aware** — each branch has its own session
+- **Isolated** — worktree keeps your main branch clean
 
-### 3. Monitor progress
+### 3. Merge or discard
 
-- **Widget** — always visible above the editor
+When done:
+
+- **Success**: Merge the worktree branch back to main: `git merge autoresearch/<session-id>`
+- **Discard**: `/autoresearch clear` removes the worktree and all experiment history
+- **Pause**: `/autoresearch off` keeps the worktree but pauses the loop
+
+### 4. Monitor progress
+
+- **Widget** — always visible above the editor (shows 📁 worktree path when isolated)
 - **`/autoresearch`** — full dashboard with results table and best run
 - **`Escape`** — interrupt anytime and ask for a summary
 
@@ -162,14 +176,16 @@ The **extension** is domain-agnostic infrastructure. The **skill** encodes domai
 └──────────────────────┘     └───────────────────────────┘
 ```
 
-Two files keep the session alive across restarts and context resets:
+Two files keep the session alive across restarts and context resets. They live inside the isolated worktree at `autoresearch/<session-id>/`:
 
 ```
 autoresearch.jsonl   — append-only log of every run (metric, status, commit, description)
 autoresearch.md      — living document: objective, what's been tried, dead ends, key wins
 ```
 
-A fresh agent with no memory can read these two files and continue exactly where the previous session left off.
+**Worktree isolation:** Each autoresearch session creates a git worktree inside `autoresearch/<session-id>/`. This keeps your main working directory clean while experiments accumulate side commits. When done, merge back the successful changes or `/autoresearch clear` to discard everything.
+
+A fresh agent with no memory can read `autoresearch.md` + `autoresearch.jsonl` and continue exactly where the previous session left off.
 
 ---
 
@@ -230,6 +246,25 @@ pnpm typecheck
 - If checks fail, the experiment is logged as `checks_failed` (same behavior as a crash — no commit, revert changes).
 - The `checks_failed` status is shown separately in the dashboard so you can distinguish correctness failures from benchmark crashes.
 - Checks have a separate timeout (default 300s, configurable via `checks_timeout_seconds` in `run_experiment`).
+
+---
+
+## Testing
+
+```bash
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Run tests with coverage
+npm run test:coverage
+```
+
+The test suite includes:
+- **56 unit tests** for metric parsing, confidence calculation, number formatting, and command validation
+- **6 integration tests** for git worktree operations
 
 ---
 
