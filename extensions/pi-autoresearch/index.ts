@@ -1036,6 +1036,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     // Primary: read from autoresearch.jsonl (alongside autoresearch.md/sh)
     const jsonlPath = path.join(workDir, "autoresearch.jsonl");
     let loadedFromJsonl = false;
+    let detectedWorktreeDir: string | null = null;
     try {
       if (fs.existsSync(jsonlPath)) {
         let segment = 0;
@@ -1097,6 +1098,17 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       }
     } catch {
       // Fall through to session history
+    }
+
+    // If we loaded data from a worktree path, restore the worktreeDir
+    if (loadedFromJsonl && jsonlPath.includes("/autoresearch/")) {
+      // Extract worktree path: everything up to /autoresearch/<session>/autoresearch.jsonl
+      // jsonlPath is like: /project/autoresearch/session-123/autoresearch.jsonl
+      // worktreeDir should be: /project/autoresearch/session-123
+      detectedWorktreeDir = path.dirname(jsonlPath);
+      if (fs.existsSync(detectedWorktreeDir)) {
+        runtime.worktreeDir = detectedWorktreeDir;
+      }
     }
 
     // Fallback: reconstruct from session history (backward compat)

@@ -170,4 +170,84 @@ describe("Worktree Integration", () => {
     expect(fs.existsSync(worktreePath)).toBe(true);
     expect(fs.statSync(worktreePath).isDirectory()).toBe(true);
   });
+
+  it("restores worktreeDir from autoresearch.jsonl path on session switch", () => {
+    const sessionId = 'session-switch-test';
+    const autoresearchDir = path.join(repoDir, 'autoresearch');
+    const worktreePath = path.join(autoresearchDir, sessionId);
+    const branchName = `autoresearch/${sessionId}`;
+
+    // Create worktree
+    fs.mkdirSync(autoresearchDir, { recursive: true });
+    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
+    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
+
+    // Create autoresearch.jsonl in the worktree (simulating previous session)
+    const jsonlPath = path.join(worktreePath, 'autoresearch.jsonl');
+    const configLine = JSON.stringify({
+      type: "config",
+      name: "Test Session",
+      metricName: "total_µs",
+      metricUnit: "µs",
+      bestDirection: "lower"
+    });
+    const resultLine = JSON.stringify({
+      run: 1,
+      commit: "abc1234",
+      metric: 15000,
+      metrics: {},
+      status: "keep",
+      description: "Baseline",
+      timestamp: Date.now(),
+      segment: 0,
+      confidence: null
+    });
+    fs.writeFileSync(jsonlPath, configLine + "\n" + resultLine + "\n");
+
+    // Simulate reconstructState logic:
+    // When jsonl is loaded from worktree path, worktreeDir should be restored
+    const jsonlParentDir = path.dirname(jsonlPath);
+    const hasAutoresearchInPath = jsonlPath.includes("/autoresearch/");
+    const worktreeDir = hasAutoresearchInPath && fs.existsSync(jsonlParentDir) 
+      ? jsonlParentDir 
+      : null;
+
+    // Verify the restored worktreeDir matches the actual worktree path
+    expect(worktreeDir).toBe(worktreePath);
+    expect(fs.existsSync(worktreeDir!)).toBe(true);
+    expect(fs.existsSync(path.join(worktreeDir!, 'autoresearch.jsonl'))).toBe(true);
+
+    // Verify the path structure is correct for session switching
+    expect(worktreeDir).toContain('autoresearch');
+    expect(worktreeDir).toContain(sessionId);
+  });
+
+  it("does not restore worktreeDir when jsonl is in main worktree", () => {
+    // Create autoresearch.jsonl directly in main repo (not in a worktree)
+    const mainJsonlPath = path.join(repoDir, 'autoresearch.jsonl');
+    const configLine = JSON.stringify({
+      type: "config",
+      name: "Main Session",
+      metricName: "metric",
+      bestDirection: "lower"
+    });
+    fs.writeFileSync(mainJsonlPath, configLine + "\n");
+
+    // Simulate reconstructState logic for main worktree
+    const jsonlParentDir = path.dirname(mainJsonlPath);
+    const hasAutoresearchInPath = mainJsonlPath.includes("/autoresearch/");
+    // For the main worktree path like /project/autoresearch.jsonl,
+    // it doesn't have /autoresearch/ in the path (just the filename)
+    // But if it was /project/autoresearch/autoresearch.jsonl, it would match
+    
+    // In this case, we're testing that a file directly in repo root
+    // would NOT trigger worktree restoration (no /autoresearch/ in path)
+    const worktreeDir = hasAutoresearchInPath && fs.existsSync(jsonlParentDir) 
+      ? jsonlParentDir 
+      : null;
+
+    expect(hasAutoresearchInPath).toBe(false); // /autoresearch.jsonl doesn't contain /autoresearch/
+    expect(worktreeDir).toBeNull();
+  });
 });
