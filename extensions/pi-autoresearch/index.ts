@@ -836,12 +836,12 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       if (hasRules) {
         ctx.ui.notify("Autoresearch mode ON — rules loaded from autoresearch.md", "info");
         pi.sendUserMessage(
-          `Autoresearch mode active. ${trimmedArgs} ${SCOPE_GUARDRAIL} ${BENCHMARK_GUARDRAIL}`
+          `Autoresearch mode active. ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`
         );
       } else {
         ctx.ui.notify("Autoresearch mode ON — no autoresearch.md found, setting up", "info");
         pi.sendUserMessage(
-          `Start autoresearch: ${trimmedArgs} ${SCOPE_GUARDRAIL} ${BENCHMARK_GUARDRAIL}`
+          `Start autoresearch: ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`
         );
       }
     },
