@@ -144,7 +144,9 @@ When done:
 ### 4. Monitor progress
 
 - **Widget** — always visible above the editor (shows 📁 worktree path when isolated)
-- **`/autoresearch`** — full dashboard with results table and best run
+- **`Ctrl+X`** — expand/collapse the full results table inline
+- **`Ctrl+Shift+X`** — fullscreen scrollable dashboard overlay
+- **`/autoresearch`** — full dashboard command
 - **`Escape`** — interrupt anytime and ask for a summary
 
 ---
