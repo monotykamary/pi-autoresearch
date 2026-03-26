@@ -213,50 +213,133 @@ export function renderDashboardLines(
 
   lines.push("");
 
-  // Determine visible rows for column pruning
+  // Determine visible rows for column sizing
   const effectiveMax = maxRows <= 0 ? st.results.length : maxRows;
   const startIdx = Math.max(0, st.results.length - effectiveMax);
   const visibleRows = st.results.slice(startIdx);
 
-  // Only show secondary metric columns that have at least one value in visible rows
+  // Filter secondary metrics that have at least one value in visible rows
   const secMetrics = st.secondaryMetrics.filter((sm) =>
     visibleRows.some((r) => (r.metrics ?? {})[sm.name] !== undefined)
   );
 
-  // Column definitions — guarantee 25% of width for description
-  const col = { idx: 3, commit: 8, primary: 11, status: 15 };
-  const secColWidth = 11;
-  const minDescW = Math.max(10, Math.floor(width * 0.25));
-  const fixedW = col.idx + col.commit + col.primary + col.status + 6;
-  const availableForSec = width - fixedW - minDescW;
+  // === SMART COLUMN WIDTH CALCULATION ===
+  // Priority: idx, commit, primary, [secondary metrics...], status, description
+  // Description gets max 25% of width. Other columns get content-based width,
+  // capped at width / totalColumns. Truncated metrics show "..." column.
 
-  // Drop secondary columns from the right until they fit
-  let visibleSecMetrics = secMetrics;
-  while (
-    visibleSecMetrics.length > 0 &&
-    visibleSecMetrics.length * secColWidth > availableForSec
-  ) {
-    visibleSecMetrics = visibleSecMetrics.slice(0, -1);
+  const descMaxW = Math.floor(width * 0.25);
+  const minGap = 2; // minimum spaces between columns
+
+  // Calculate content widths by scanning visible rows
+  function contentWidth(values: (string | undefined)[], header: string): number {
+    const maxContent = Math.max(header.length, ...values.filter(Boolean).map((v) => visibleWidth(v!)));
+    return maxContent;
   }
 
-  const totalSecWidth = visibleSecMetrics.length * secColWidth;
-  const descW = Math.max(minDescW, width - fixedW - totalSecWidth);
+  const rowIndices = visibleRows.map((_, i) => String(startIdx + i + 1));
+  const commits = visibleRows.map((r) => r.commit);
+  const primaryValues = visibleRows.map((r) => formatNum(r.metric, st.metricUnit));
+  const statuses = visibleRows.map((r) => r.status);
 
-  // Table header — primary metric name bolded with ★
+  const idxW = contentWidth(rowIndices, "#");
+  const commitW = contentWidth(commits, "commit");
+  const primaryW = contentWidth(primaryValues, "★ " + st.metricName);
+  const statusW = contentWidth(statuses, "status");
+
+  // Calculate secondary metric content widths
+  const secWidths = secMetrics.map((sm) => {
+    const values = visibleRows.map((r) => {
+      const val = (r.metrics ?? {})[sm.name];
+      return val !== undefined ? formatNum(val, sm.unit) : undefined;
+    });
+    return { name: sm.name, width: contentWidth(values, sm.name) };
+  });
+
+  // Determine how many columns we could potentially show (for capping)
+  const totalPotentialCols = 5 + secMetrics.length; // idx, commit, primary, status, desc + secondaries
+  const maxColWidth = Math.floor(width / totalPotentialCols);
+
+  // Essential columns (idx, commit, primary, status) always show full content
+  const cappedIdxW = idxW + minGap;
+  const cappedCommitW = commitW + minGap;
+  const cappedPrimaryW = primaryW + minGap;
+  const cappedStatusW = statusW + minGap;
+  // Secondary metrics use FULL content width (not capped)
+  const finalSecWidths = secWidths.map((sw) => ({
+    ...sw,
+    width: sw.width + minGap,
+  }));
+
+  // Fixed columns width (essential columns always shown)
+  const fixedColsW = cappedIdxW + cappedCommitW + cappedPrimaryW + cappedStatusW;
+
+  // Calculate how many secondary metrics actually fit
+  // Each secondary metric uses its FULL content width
+  let visibleSecCount = 0;
+  let accumulatedSecW = 0;
+  const minDescWidth = 25; // Minimum meaningful description width
+
+  for (let i = 0; i < finalSecWidths.length; i++) {
+    const secW = finalSecWidths[i].width;
+    // Check if this secondary metric fits
+    // Must reserve: accumulated secondaries + this one + ellipsis (5 chars if any would be hidden) + min description
+    const wouldHaveHidden = finalSecWidths.length > i + 1;
+    const neededWidth = fixedColsW + accumulatedSecW + secW + (wouldHaveHidden ? 5 : 0) + minDescWidth;
+    if (neededWidth < width) {
+      visibleSecCount++;
+      accumulatedSecW += secW;
+    } else {
+      break;
+    }
+  }
+
+  // Show ellipsis column if there are hidden secondary metrics
+  const ellipsisW = visibleSecCount < finalSecWidths.length ? minGap + 3 : 0; // 5 for "...  " (3 dots + 2 space gap)
+
+  // Calculate description width (respecting max 25%, min 25 chars)
+  const descW = Math.max(minDescWidth, Math.min(descMaxW, width - fixedColsW - accumulatedSecW - ellipsisW));
+
+  // Final column config
+  const col = {
+    idx: cappedIdxW,
+    commit: cappedCommitW,
+    primary: cappedPrimaryW,
+    status: cappedStatusW,
+    desc: descW,
+  };
+  const visibleSecMetrics = secMetrics.slice(0, visibleSecCount);
+  const visibleSecWidths = finalSecWidths.slice(0, visibleSecCount);
+
+  // Helper to fit text within column width (including the 2-space gap)
+  // If text is too long, truncates and adds "..."
+  const fit = (s: string, colW: number) => {
+    const contentW = colW - minGap; // space for actual content (gap is trailing space)
+    const visW = visibleWidth(s);
+    if (visW <= contentW) return s.padEnd(colW);
+    // Need to truncate - reserve 3 chars for "..."
+    return truncateToWidth(s, contentW - 3) + "...";
+  };
+
+  // Table header
   let headerLine =
-    `  ${th.fg("muted", "#".padEnd(col.idx))}` +
-    `${th.fg("muted", "commit".padEnd(col.commit))}` +
-    `${th.fg("warning", th.bold(("★ " + st.metricName).slice(0, col.primary - 1).padEnd(col.primary)))}`;
+    `  ${th.fg("muted", fit("#", col.idx))}` +
+    `${th.fg("muted", fit("commit", col.commit))}` +
+    `${th.fg("warning", th.bold(fit("★ " + st.metricName, col.primary)))}`;
 
-  for (const sm of visibleSecMetrics) {
-    headerLine += th.fg(
-      "muted",
-      sm.name.slice(0, secColWidth - 1).padEnd(secColWidth)
-    );
+  for (let i = 0; i < visibleSecMetrics.length; i++) {
+    const sm = visibleSecMetrics[i];
+    const w = visibleSecWidths[i].width;
+    // Truncate secondary metric names if needed
+    headerLine += th.fg("muted", truncateToWidth(sm.name, w - minGap).padEnd(w));
+  }
+
+  if (ellipsisW > 0) {
+    headerLine += th.fg("dim", "...".padEnd(ellipsisW));
   }
 
   headerLine +=
-    `${th.fg("muted", "status".padEnd(col.status))}` +
+    `${th.fg("muted", fit("status", col.status))}` +
     `${th.fg("muted", "description")}`;
 
   lines.push(truncateToWidth(headerLine, width));
@@ -301,7 +384,7 @@ export function renderDashboardLines(
     let primaryColor: Parameters<typeof th.fg>[0] = isOld ? "dim" : "text";
     if (!isOld) {
       if (isBaseline) {
-        primaryColor = "text"; // baseline row — normal text
+        primaryColor = "text";
       } else if (
         baselinePrimary !== null &&
         r.status === "keep" &&
@@ -316,20 +399,28 @@ export function renderDashboardLines(
     }
 
     const idxStr = th.fg("dim", String(i + 1).padEnd(col.idx));
-    const commitStr = isOld
-      ? "(old)".padEnd(col.commit)
-      : r.status !== "keep"
-        ? "—".padStart(Math.ceil(col.commit / 2)).padEnd(col.commit)
-        : r.commit.padEnd(col.commit);
+
+    // Commit column: show "(old)", "—", or the commit hash
+    let commitDisplay = "";
+    if (isOld) {
+      commitDisplay = "(old)";
+    } else if (r.status !== "keep") {
+      commitDisplay = "—";
+    } else {
+      commitDisplay = r.commit;
+    }
+    const commitStr = th.fg(isOld ? "dim" : "accent", fit(commitDisplay, col.commit));
 
     let rowLine =
       `  ${idxStr}` +
-      `${th.fg(isOld ? "dim" : "accent", commitStr)}` +
-      `${th.fg(primaryColor, isOld ? primaryStr.padEnd(col.primary) : th.bold(primaryStr.padEnd(col.primary)))}`;
+      `${commitStr}` +
+      `${th.fg(primaryColor, isOld ? fit(primaryStr, col.primary) : th.bold(fit(primaryStr, col.primary)))}`;
 
-    // Secondary metrics (only visible columns)
+    // Secondary metrics (only visible columns - show full values, no truncation)
     const rowMetrics = r.metrics ?? {};
-    for (const sm of visibleSecMetrics) {
+    for (let si = 0; si < visibleSecMetrics.length; si++) {
+      const sm = visibleSecMetrics[si];
+      const w = visibleSecWidths[si].width;
       const val = rowMetrics[sm.name];
       if (val !== undefined) {
         const secStr = formatNum(val, sm.unit);
@@ -337,20 +428,27 @@ export function renderDashboardLines(
         if (!isOld) {
           const bv = baselineSecondary[sm.name];
           if (isBaseline) {
-            secColor = "text"; // baseline row — normal text
+            secColor = "text";
           } else if (bv !== undefined && bv !== 0) {
             secColor = val <= bv ? "success" : "error";
           }
         }
-        rowLine += th.fg(secColor, secStr.padEnd(secColWidth));
+        // Truncate if needed
+        rowLine += th.fg(secColor, truncateToWidth(secStr, w - minGap).padEnd(w));
       } else {
-        rowLine += th.fg("dim", "—".padEnd(secColWidth));
+        rowLine += th.fg("dim", "—".padEnd(w));
       }
     }
 
+    // Ellipsis column if metrics were truncated
+    if (ellipsisW > 0) {
+      const hasHiddenMetrics = secMetrics.slice(visibleSecCount).some((sm) => rowMetrics[sm.name] !== undefined);
+      rowLine += th.fg("dim", hasHiddenMetrics ? "...".padEnd(ellipsisW) : " ".repeat(ellipsisW));
+    }
+
     rowLine +=
-      `${th.fg(color, r.status.padEnd(col.status))}` +
-      `${th.fg("muted", r.description.slice(0, descW))}`;
+      `${th.fg(color, fit(r.status, col.status))}` +
+      `${th.fg("muted", r.description.slice(0, col.desc))}`;
 
     lines.push(truncateToWidth(rowLine, width));
   }
