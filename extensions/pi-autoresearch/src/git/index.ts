@@ -130,10 +130,10 @@ export async function createAutoresearchWorktree(
       { cwd: ctxCwd, timeout: 5000 }
     );
     if (!branchResult.stdout.trim()) {
-      // Create branch from current HEAD
+      // Create branch from current HEAD without switching (just create the ref)
       const createResult = await pi.exec(
         "git",
-        ["checkout", "-b", branchName],
+        ["branch", branchName],
         { cwd: ctxCwd, timeout: 10000 }
       );
       if (createResult.code !== 0) {

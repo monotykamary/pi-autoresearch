@@ -274,6 +274,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
   const reconstructState = (ctx: ExtensionContext) => {
     const runtime = getRuntime(ctx);
+    
+    // Preserve worktreeDir - it may have been set by /autoresearch command
+    // and we don't want to lose it before init_experiment runs
+    const preservedWorktreeDir = runtime.worktreeDir;
+    
     runtime.lastRunChecks = null;
     runtime.lastRunDuration = null;
     runtime.runningExperiment = null;
@@ -360,8 +365,13 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       // Fall through to session history
     }
 
-    // If we loaded data from a worktree path, restore the worktreeDir
-    if (loadedFromJsonl && jsonlPath.includes("/autoresearch/")) {
+    // Restore worktreeDir: prioritize the preserved one (from /autoresearch command)
+    // over the one detected from JSONL (which might be stale from a previous session)
+    if (preservedWorktreeDir && fs.existsSync(preservedWorktreeDir)) {
+      // Use the preserved worktree (newly created by /autoresearch command)
+      runtime.worktreeDir = preservedWorktreeDir;
+    } else if (loadedFromJsonl && jsonlPath.includes("/autoresearch/")) {
+      // Fallback: detect worktree from JSONL path (for session restore)
       const detectedWorktreeDir = path.dirname(jsonlPath);
       if (fs.existsSync(detectedWorktreeDir)) {
         runtime.worktreeDir = detectedWorktreeDir;

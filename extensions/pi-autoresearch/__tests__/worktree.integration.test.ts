@@ -39,14 +39,41 @@ describe("Worktree Integration", () => {
     }
   });
 
+  it("main worktree stays on original branch when creating worktree", () => {
+    const sessionId = 'test-session-branch-check';
+    const worktreePath = path.join(repoDir, 'autoresearch', sessionId);
+    const branchName = `autoresearch/${sessionId}`;
+
+    // Get the original branch name before creating worktree
+    const originalBranch = execSync('git branch --show-current', { cwd: repoDir, encoding: 'utf8' }).trim();
+    expect(['main', 'master']).toContain(originalBranch);
+
+    // Create branch WITHOUT switching (the fixed behavior)
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
+
+    // Verify main worktree is STILL on original branch (was NOT switched)
+    const mainBranchAfterCreate = execSync('git branch --show-current', { cwd: repoDir, encoding: 'utf8' }).trim();
+    expect(mainBranchAfterCreate).toBe(originalBranch);
+
+    // Create worktree
+    execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
+
+    // Verify main worktree is still on original branch after worktree creation
+    const mainBranchAfterWorktree = execSync('git branch --show-current', { cwd: repoDir, encoding: 'utf8' }).trim();
+    expect(mainBranchAfterWorktree).toBe(originalBranch);
+
+    // Verify worktree is on the autoresearch branch
+    const worktreeBranch = execSync('git branch --show-current', { cwd: worktreePath, encoding: 'utf8' }).trim();
+    expect(worktreeBranch).toBe(branchName);
+  });
+
   it("creates worktree with branch", () => {
     const sessionId = 'test-session-1';
     const worktreePath = path.join(repoDir, 'autoresearch', sessionId);
     const branchName = `autoresearch/${sessionId}`;
 
-    // Create branch
-    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
-    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    // Create branch WITHOUT switching (simulating fixed behavior)
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
 
     // Create worktree
     execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
@@ -59,6 +86,10 @@ describe("Worktree Integration", () => {
     // Verify it's on correct branch
     const branch = execSync('git branch --show-current', { cwd: worktreePath, encoding: 'utf8' }).trim();
     expect(branch).toBe(branchName);
+
+    // Verify main worktree is still on main/master (was NOT switched)
+    const mainBranch = execSync('git branch --show-current', { cwd: repoDir, encoding: 'utf8' }).trim();
+    expect(['main', 'master']).toContain(mainBranch);
   });
 
   it("lists worktrees correctly", () => {
@@ -66,9 +97,8 @@ describe("Worktree Integration", () => {
     const worktreePath = path.join(repoDir, 'autoresearch', sessionId);
     const branchName = `autoresearch/${sessionId}`;
 
-    // Create worktree
-    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
-    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    // Create worktree (using git branch instead of checkout -b)
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
     execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
 
     // List worktrees
@@ -82,9 +112,8 @@ describe("Worktree Integration", () => {
     const worktreePath = path.join(repoDir, 'autoresearch', sessionId);
     const branchName = `autoresearch/${sessionId}`;
 
-    // Create worktree
-    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
-    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    // Create worktree (using git branch instead of checkout -b)
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
     execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
 
     // Add file in worktree
@@ -108,9 +137,8 @@ describe("Worktree Integration", () => {
     const worktreePath = path.join(repoDir, 'autoresearch', sessionId);
     const branchName = `autoresearch/${sessionId}`;
 
-    // Create worktree
-    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
-    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    // Create worktree (using git branch instead of checkout -b)
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
     execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
 
     // Verify it exists
@@ -137,9 +165,8 @@ describe("Worktree Integration", () => {
     const worktreePath = path.join(repoDir, 'autoresearch', sessionId);
     const branchName = `autoresearch/${sessionId}`;
 
-    // Create worktree
-    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
-    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    // Create worktree (using git branch instead of checkout -b)
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
     execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
 
     // Check worktree list for existing worktree
@@ -160,9 +187,8 @@ describe("Worktree Integration", () => {
     // Create autoresearch directory
     fs.mkdirSync(autoresearchDir, { recursive: true });
 
-    // Create worktree inside it
-    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
-    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    // Create worktree inside it (using git branch instead of checkout -b)
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
     execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
 
     // Verify structure
@@ -177,10 +203,9 @@ describe("Worktree Integration", () => {
     const worktreePath = path.join(autoresearchDir, sessionId);
     const branchName = `autoresearch/${sessionId}`;
 
-    // Create worktree
+    // Create worktree (using git branch instead of checkout -b)
     fs.mkdirSync(autoresearchDir, { recursive: true });
-    execSync(`git checkout -b ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
-    execSync('git checkout -', { cwd: repoDir, stdio: 'ignore' });
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
     execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
 
     // Create autoresearch.jsonl in the worktree (simulating previous session)
