@@ -28,15 +28,53 @@ function renderScatterPlot(
 ): string[] {
   const lines: string[] = [];
   
-  // Only show current segment results (last 20 for sliding window)
+  // Filter to current segment
   const segmentResults = results.filter(r => r.segment === segment);
-  const windowSize = 20;
-  const startIdx = segmentResults.length > windowSize 
-    ? segmentResults.length - windowSize 
-    : 0;
-  const displayResults = segmentResults.slice(startIdx);
-  // Track original run numbers (1-indexed)
-  const runNumbers = displayResults.map((_, i) => startIdx + i + 1);
+  
+  // Stratified sampling: 1 (first) + 19 (bucketed middle) + 10 (recent detail)
+  const maxPoints = 30;
+  const reservedForRecent = 10;
+  
+  let displayResults: ExperimentResult[];
+  let runNumbers: number[];
+  
+  if (segmentResults.length <= maxPoints) {
+    // Show all if they fit
+    displayResults = segmentResults;
+    runNumbers = displayResults.map((_, i) => i + 1);
+  } else {
+    const bucketableCount = maxPoints - reservedForRecent - 1; // 19
+    const first = segmentResults[0];
+    const recent = segmentResults.slice(-reservedForRecent);
+    const middle = segmentResults.slice(1, -reservedForRecent);
+    
+    // Bucket the middle section
+    const bucketSize = Math.max(1, Math.ceil(middle.length / bucketableCount));
+    const bucketed: ExperimentResult[] = [];
+    
+    for (let i = 0; i < middle.length; i += bucketSize) {
+      const bucket = middle.slice(i, i + bucketSize);
+      // Use median metric for representative point (more stable than min/max)
+      const sortedByMetric = [...bucket].sort((a, b) => a.metric - b.metric);
+      const medianResult = sortedByMetric[Math.floor(sortedByMetric.length / 2)];
+      bucketed.push(medianResult);
+    }
+    
+    displayResults = [first, ...bucketed, ...recent];
+    
+    // Build run numbers: 1, then bucket centers, then last 10
+    runNumbers = [1];
+    for (let i = 0; i < bucketed.length; i++) {
+      // Calculate approximate original run number for this bucket
+      const bucketStartIdx = 1 + i * bucketSize;
+      const bucketCenterIdx = bucketStartIdx + Math.floor(bucketSize / 2);
+      runNumbers.push(Math.min(bucketCenterIdx, segmentResults.length - reservedForRecent));
+    }
+    for (let i = 0; i < recent.length; i++) {
+      runNumbers.push(segmentResults.length - reservedForRecent + i + 1);
+    }
+  }
+  
   if (displayResults.length === 0) return lines;
   
   // Find metric range from displayed results

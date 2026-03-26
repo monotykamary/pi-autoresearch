@@ -1984,3 +1984,342 @@ describe("Cherry-picked fixes from upstream (fcd55f7)", () => {
     });
   });
 });
+
+// ============================================================================
+// Tests: Stratified Chart Bucketing
+// ============================================================================
+
+describe("Stratified chart bucketing", () => {
+  const createSegmentResult = (
+    metric: number,
+    runNumber: number,
+    status: ExperimentResult["status"] = "keep",
+    segment = 0
+  ): ExperimentResult => ({
+    commit: `abc${runNumber.toString().padStart(4, "0")}`,
+    metric,
+    metrics: {},
+    status,
+    description: `Run ${runNumber}`,
+    timestamp: Date.now() + runNumber,
+    segment,
+    confidence: null,
+  });
+
+  /**
+   * Simulates the stratified bucketing logic from renderScatterPlot
+   * Returns the display results and their original run numbers
+   */
+  function stratifiedBucket(
+    segmentResults: ExperimentResult[],
+    maxPoints = 30,
+    reservedForRecent = 10
+  ): { displayResults: ExperimentResult[]; runNumbers: number[] } {
+    if (segmentResults.length <= maxPoints) {
+      return {
+        displayResults: segmentResults,
+        runNumbers: segmentResults.map((_, i) => i + 1),
+      };
+    }
+
+    const bucketableCount = maxPoints - reservedForRecent - 1;
+    const first = segmentResults[0];
+    const recent = segmentResults.slice(-reservedForRecent);
+    const middle = segmentResults.slice(1, -reservedForRecent);
+
+    // Bucket the middle section
+    const bucketSize = Math.max(1, Math.ceil(middle.length / bucketableCount));
+    const bucketed: ExperimentResult[] = [];
+
+    for (let i = 0; i < middle.length; i += bucketSize) {
+      const bucket = middle.slice(i, i + bucketSize);
+      // Use median metric for representative point
+      const sortedByMetric = [...bucket].sort((a, b) => a.metric - b.metric);
+      const medianResult = sortedByMetric[Math.floor(sortedByMetric.length / 2)];
+      bucketed.push(medianResult);
+    }
+
+    const displayResults = [first, ...bucketed, ...recent];
+
+    // Build run numbers: 1, then bucket centers, then last 10
+    const runNumbers: number[] = [1];
+    for (let i = 0; i < bucketed.length; i++) {
+      const bucketStartIdx = 1 + i * bucketSize;
+      const bucketCenterIdx = bucketStartIdx + Math.floor(bucketSize / 2);
+      runNumbers.push(Math.min(bucketCenterIdx, segmentResults.length - reservedForRecent));
+    }
+    for (let i = 0; i < recent.length; i++) {
+      runNumbers.push(segmentResults.length - reservedForRecent + i + 1);
+    }
+
+    return { displayResults, runNumbers };
+  }
+
+  describe("Small datasets (≤30 points)", () => {
+    it("shows all results when ≤30 samples", () => {
+      const results = Array.from({ length: 25 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      expect(displayResults.length).toBe(25);
+      expect(runNumbers).toEqual(Array.from({ length: 25 }, (_, i) => i + 1));
+    });
+
+    it("shows all 30 results at exactly 30 samples", () => {
+      const results = Array.from({ length: 30 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      expect(displayResults.length).toBe(30);
+      expect(runNumbers).toEqual(Array.from({ length: 30 }, (_, i) => i + 1));
+    });
+
+    it("preserves original order for small datasets", () => {
+      const results = [
+        createSegmentResult(100, 1),
+        createSegmentResult(90, 2),
+        createSegmentResult(95, 3),
+        createSegmentResult(85, 4),
+        createSegmentResult(80, 5),
+      ];
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      expect(displayResults.map((r) => r.metric)).toEqual([100, 90, 95, 85, 80]);
+      expect(runNumbers).toEqual([1, 2, 3, 4, 5]);
+    });
+  });
+
+  describe("Large datasets (>30 points)", () => {
+    it("always includes first result in bucketing mode", () => {
+      const results = Array.from({ length: 100 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      expect(displayResults[0].metric).toBe(100); // First result
+      expect(runNumbers[0]).toBe(1);
+    });
+
+    it("always includes last 10 recent results", () => {
+      const results = Array.from({ length: 100 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      // 100 results: 1 first + 89 middle + 10 recent
+      // 89 middle / 19 bucket slots = ceil(89/19) = 5 per bucket
+      // Actual buckets = ceil(89/5) = 18
+      // Total = 1 + 18 + 10 = 29 (close to max of 30)
+      expect(displayResults.length).toBe(29);
+
+      // Last 10 should be the most recent
+      const recentMetrics = displayResults.slice(-10).map((r) => r.metric);
+      const expectedRecent = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]; // Runs 91-100
+      expect(recentMetrics).toEqual(expectedRecent);
+
+      // Run numbers should be 91-100
+      const recentRunNumbers = runNumbers.slice(-10);
+      expect(recentRunNumbers).toEqual([91, 92, 93, 94, 95, 96, 97, 98, 99, 100]);
+    });
+
+    it("uses median for bucketing", () => {
+      // Create results with clear buckets: each bucket of 4 has predictable median
+      // Bucket 1 (runs 2-5): metrics [2, 4, 6, 8] -> median should be 4 or 6
+      // Bucket 2 (runs 6-9): metrics [10, 12, 14, 16] -> median should be 12 or 14
+      // etc.
+      const results: ExperimentResult[] = [createSegmentResult(0, 1)]; // First result
+      
+      // Add 40 more results in groups of 4 (will be 4 results per bucket)
+      for (let i = 0; i < 40; i++) {
+        results.push(createSegmentResult((i + 1) * 2, i + 2));
+      }
+      // 41 total results: 1 first + 30 middle + 10 recent
+      // Actually: 1 first + 30 bucketed (4 per bucket) + 10 recent
+      // Wait, 41 total - 1 first - 10 recent = 30 middle, bucketed into 19 slots
+      // With 30 middle and 19 buckets: bucketSize = ceil(30/19) = 2
+      
+      const { displayResults } = stratifiedBucket(results);
+      
+      // First result
+      expect(displayResults[0].metric).toBe(0);
+      
+      // Middle results should be medians of their buckets
+      // Each bucket has 2 items with bucketSize=2, median is the second item in sorted order
+      // Bucket 0 (runs 2-3): [2, 4] -> median 4
+      // Bucket 1 (runs 4-5): [6, 8] -> median 8
+      // etc.
+      expect(displayResults[1].metric).toBe(4);  // median of [2, 4]
+      expect(displayResults[2].metric).toBe(8);  // median of [6, 8]
+    });
+
+    it("calculates correct run numbers for buckets", () => {
+      const results = Array.from({ length: 50 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      // 50 results: 1 first + 39 middle + 10 recent
+      // 39 middle / 19 bucket slots = ceil(39/19) = 3 per bucket
+      // Actual buckets = ceil(39/3) = 13
+      // Total = 1 + 13 + 10 = 24
+      expect(displayResults.length).toBe(24);
+
+      // First run number should be 1
+      expect(runNumbers[0]).toBe(1);
+
+      // Bucket run numbers should approximate center of each bucket
+      // Bucket 0: runs 2-4, center ~3
+      expect(runNumbers[1]).toBeGreaterThanOrEqual(2);
+
+      // Last 10 should be exact: 41-50
+      expect(runNumbers.slice(-10)).toEqual([41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
+    });
+  });
+
+  describe("Edge cases", () => {
+    it("handles exactly 31 samples (first bucketing threshold)", () => {
+      const results = Array.from({ length: 31 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      // 31 results: 1 first + 20 middle + 10 recent
+      // 20 middle / 19 bucket slots = ceil(20/19) = 2 per bucket
+      // Actual buckets = ceil(20/2) = 10
+      // Total = 1 + 10 + 10 = 21
+      expect(displayResults.length).toBe(21);
+      expect(displayResults[0].metric).toBe(100); // First preserved
+      expect(runNumbers[0]).toBe(1);
+      expect(runNumbers[runNumbers.length - 1]).toBe(31); // Last is #31
+    });
+
+    it("handles very large datasets (500+ samples)", () => {
+      const results = Array.from({ length: 500 }, (_, i) =>
+        createSegmentResult(1000 - i * 2, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      // Still capped at 30 points
+      expect(displayResults.length).toBe(30);
+
+      // First and last 10 should be exact
+      expect(displayResults[0].runNumber).toBeUndefined(); // Check via metric
+      expect(displayResults[0].metric).toBe(1000); // First
+      expect(runNumbers[0]).toBe(1);
+      expect(runNumbers[runNumbers.length - 1]).toBe(500); // Last
+
+      // Middle should be bucketed (~26 samples per bucket)
+      const bucketedCount = 500 - 1 - 10; // 489 middle samples
+      const expectedBucketSize = Math.ceil(bucketedCount / 19); // ~26
+      expect(expectedBucketSize).toBe(26);
+    });
+
+    it("handles negative metrics correctly", () => {
+      const results = [
+        createSegmentResult(-100, 1),
+        ...Array.from({ length: 35 }, (_, i) => createSegmentResult(-50 + i, i + 2)),
+      ];
+
+      const { displayResults } = stratifiedBucket(results);
+
+      // 36 total: 1 first + 25 middle + 10 recent
+      // 25 middle / 19 buckets = ceil(25/19) = 2 per bucket
+      // = 1 + ceil(25/2) + 10 = 1 + 13 + 10 = 24
+      expect(displayResults.length).toBe(24);
+      expect(displayResults[0].metric).toBe(-100); // First preserved
+    });
+
+    it("preserves status for recent results (keep/discard/crash)", () => {
+      const results: ExperimentResult[] = [
+        createSegmentResult(100, 1, "keep"),
+        ...Array.from({ length: 35 }, (_, i) => {
+          const status: ExperimentResult["status"] = i % 3 === 0 ? "keep" : i % 3 === 1 ? "discard" : "crash";
+          return createSegmentResult(90 - i, i + 2, status);
+        }),
+      ];
+
+      const { displayResults } = stratifiedBucket(results);
+
+      // Last 10 should preserve their original status
+      const recentStatuses = displayResults.slice(-10).map((r) => r.status);
+      const expectedStatuses = results.slice(-10).map((r) => r.status);
+      expect(recentStatuses).toEqual(expectedStatuses);
+    });
+
+    it("handles single bucket scenario (31-48 samples)", () => {
+      // With 31-48 samples: 1 first + (n-11) middle + 10 recent
+      // When middle < 19, we don't fill all bucket slots
+      const results = Array.from({ length: 35 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1)
+      );
+
+      const { displayResults, runNumbers } = stratifiedBucket(results);
+
+      // 35 samples: 1 first + 24 middle + 10 recent
+      // 24 middle / 19 buckets = ceil(24/19) = 2 per bucket
+      // = 1 + ceil(24/2) + 10 = 1 + 12 + 10 = 23
+      expect(displayResults.length).toBe(23);
+      expect(runNumbers[0]).toBe(1); // First
+      expect(runNumbers[runNumbers.length - 1]).toBe(35); // Last
+    });
+
+    it("handles status variety in buckets (median doesn't care about status)", () => {
+      // The bucketing uses median by metric value, not by status
+      const mixedResults: ExperimentResult[] = [
+        createSegmentResult(100, 1, "keep"), // First
+        // Bucket will have mixed statuses, median picks by metric
+        createSegmentResult(50, 2, "keep"),
+        createSegmentResult(30, 3, "crash"),
+        createSegmentResult(40, 4, "discard"),
+        createSegmentResult(60, 5, "keep"),
+        // ... more to get past 30
+        ...Array.from({ length: 30 }, (_, i) => createSegmentResult(25 - i, i + 6, "keep")),
+      ];
+
+      const { displayResults } = stratifiedBucket(mixedResults);
+
+      // 35 total: 1 first + 24 middle + 10 recent
+      // 24 middle / 19 = ceil(24/19) = 2 per bucket
+      // = 1 + 12 + 10 = 23
+      expect(displayResults.length).toBe(23);
+
+      // The bucketed point should be the median metric, regardless of status
+      // For runs 2-5: metrics [50, 30, 40, 60], sorted [30, 40, 50, 60], median at index 2 = 50
+      expect(displayResults[1].metric).toBe(50); // First bucket median
+    });
+  });
+
+  describe("Multiple segments", () => {
+    it("only buckets within the specified segment", () => {
+      const segment0Results = Array.from({ length: 50 }, (_, i) =>
+        createSegmentResult(100 - i, i + 1, "keep", 0)
+      );
+      const segment1Results = Array.from({ length: 40 }, (_, i) =>
+        createSegmentResult(200 - i, i + 1, "keep", 1)
+      );
+
+      const allResults = [...segment0Results, ...segment1Results];
+
+      // Filter to segment 1 (should work on filtered results only)
+      const segment1Only = allResults.filter((r) => r.segment === 1);
+      const { displayResults, runNumbers } = stratifiedBucket(segment1Only);
+
+      // 40 samples in segment: 1 first + 29 middle + 10 recent
+      // 29 middle / 19 buckets = ceil(29/19) = 2 per bucket
+      // = 1 + ceil(29/2) + 10 = 1 + 15 + 10 = 26
+      expect(displayResults.length).toBe(26);
+      expect(displayResults[0].metric).toBe(200); // First of segment 1
+      expect(runNumbers[0]).toBe(1); // Relative to segment
+    });
+  });
+});
