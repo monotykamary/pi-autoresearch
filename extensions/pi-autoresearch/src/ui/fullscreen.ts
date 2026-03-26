@@ -2,7 +2,7 @@
  * Fullscreen dashboard overlay TUI
  */
 
-import { matchesKey, visibleWidth, truncateToWidth } from "@mariozechner/pi-tui";
+import { matchesKey, Key, visibleWidth, truncateToWidth } from "@mariozechner/pi-tui";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AutoresearchRuntime } from "../types/index.js";
 import { renderDashboardLines } from "../dashboard/index.js";
@@ -185,17 +185,17 @@ export function createFullscreenHandler(
             const totalRows = renderDashboardLines(state, lastSectionWidth, theme, 0, worktreeDisplayRows).length + (runtime.runningExperiment ? 1 : 0);
             const maxScroll = Math.max(0, totalRows - viewportRows);
 
-            if (matchesKey(data, "tui.escape") || data === "q") {
+            if (matchesKey(data, Key.escape) || data === "q") {
               done(undefined);
               return;
             }
-            if (matchesKey(data, "tui.up") || data === "k") {
+            if (matchesKey(data, Key.up) || data === "k") {
               scrollOffset = Math.max(0, scrollOffset - 1);
-            } else if (matchesKey(data, "tui.down") || data === "j") {
+            } else if (matchesKey(data, Key.down) || data === "j") {
               scrollOffset = Math.min(maxScroll, scrollOffset + 1);
-            } else if (matchesKey(data, "tui.pageUp") || data === "u") {
+            } else if (matchesKey(data, Key.pageUp) || data === "u") {
               scrollOffset = Math.max(0, scrollOffset - viewportRows);
-            } else if (matchesKey(data, "tui.pageDown") || data === "d") {
+            } else if (matchesKey(data, Key.pageDown) || data === "d") {
               scrollOffset = Math.min(maxScroll, scrollOffset + viewportRows);
             } else if (data === "g") {
               scrollOffset = 0;
