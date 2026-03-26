@@ -3,9 +3,78 @@
  */
 
 import * as path from "node:path";
+import * as os from "node:os";
 import * as fs from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutoresearchRuntime, AutoresearchConfig } from "../types/index.js";
+
+/** Get the path to the global gitignore file */
+function getGlobalGitignorePath(): string | null {
+  try {
+    // Check if core.excludesfile is set
+    const { execSync } = require("node:child_process");
+    const result = execSync("git config --global core.excludesfile", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const configured = result.trim();
+    if (configured) return configured;
+  } catch {
+    // Not configured, fall through to default
+  }
+
+  // Default locations by platform
+  // Check env vars first (allows testing with fake home), then os.homedir()
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+  const candidates = [
+    path.join(home, ".gitignore"),
+    path.join(home, ".gitignore_global"),
+    path.join(home, ".config", "git", "ignore"),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  // Default to ~/.gitignore if nothing exists
+  return path.join(home, ".gitignore");
+}
+
+/** Ensure autoresearch/ is in the global gitignore */
+function ensureGlobalGitignore(): void {
+  try {
+    const gitignorePath = getGlobalGitignorePath();
+    if (!gitignorePath) return;
+
+    const pattern = "autoresearch/";
+    let content = "";
+
+    if (fs.existsSync(gitignorePath)) {
+      content = fs.readFileSync(gitignorePath, "utf-8");
+      // Already present?
+      if (content.split(/\r?\n/).some((line) => line.trim() === pattern)) {
+        return;
+      }
+    }
+
+    // Ensure parent directory exists
+    const parentDir = path.dirname(gitignorePath);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+
+    // Append with a comment
+    const entry = content.endsWith("\n") || content === ""
+      ? `# pi-autoresearch worktrees\n${pattern}\n`
+      : `\n# pi-autoresearch worktrees\n${pattern}\n`;
+
+    fs.appendFileSync(gitignorePath, entry, "utf-8");
+  } catch {
+    // Silently fail — this is a convenience, not a requirement
+  }
+}
 
 /** Read autoresearch.config.json from the given directory */
 export function readConfig(cwd: string): AutoresearchConfig {
@@ -151,6 +220,9 @@ export async function createAutoresearchWorktree(
     if (worktreeResult.code !== 0) {
       return null;
     }
+
+    // Ensure global gitignore ignores autoresearch worktrees
+    ensureGlobalGitignore();
 
     return worktreePath;
   } catch {

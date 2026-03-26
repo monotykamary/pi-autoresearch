@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
@@ -505,5 +506,218 @@ describe("File Redirection Integration", () => {
     
     // Non-existent file should throw
     await expect(ops.access('nonexistent.txt')).rejects.toThrow();
+  });
+});
+
+// ============================================================================
+// Integration Tests: Global Gitignore
+// ============================================================================
+
+describe("Global Gitignore Integration", () => {
+  const testDir = path.join(__dirname, '.test-gitignore');
+  const homeDir = path.join(testDir, 'home');
+  let originalEnv: string | undefined;
+  let originalGitConfig: string | undefined;
+
+  beforeEach(() => {
+    // Save original state
+    originalEnv = process.env.HOME;
+    try {
+      originalGitConfig = execSync('git config --global core.excludesfile', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim() || undefined;
+    } catch {
+      originalGitConfig = undefined;
+    }
+
+    // Create fake home directory
+    fs.mkdirSync(homeDir, { recursive: true });
+    process.env.HOME = homeDir;
+    
+    // Also set HOME for os.homedir()
+    process.env.USERPROFILE = homeDir;  // Windows fallback
+  });
+
+  afterEach(() => {
+    // Restore original state
+    process.env.HOME = originalEnv;
+    process.env.USERPROFILE = originalEnv;
+    try {
+      if (originalGitConfig) {
+        execSync(`git config --global core.excludesfile "${originalGitConfig}"`, { stdio: 'ignore' });
+      } else {
+        execSync('git config --global --unset core.excludesfile', { stdio: 'ignore' });
+      }
+    } catch {
+      // Ignore restore errors
+    }
+
+    // Cleanup test directory
+    try {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it("creates global gitignore with autoresearch pattern when none exists", async () => {
+    // Import fresh to trigger ensureGlobalGitignore
+    const gitModule = await import('../src/git/index.js');
+    
+    // Call createAutoresearchWorktree which internally calls ensureGlobalGitignore
+    // We need to mock pi.exec or test the function directly
+    // Since ensureGlobalGitignore is private, we test through createAutoresearchWorktree
+    
+    // Create a mock pi object
+    const mockExecResults: Record<string, { code: number; stdout: string; stderr: string }> = {
+      'git worktree list --porcelain': { code: 0, stdout: '', stderr: '' },
+      'git branch --list autoresearch/test': { code: 0, stdout: '', stderr: '' },
+      'git branch autoresearch/test': { code: 0, stdout: '', stderr: '' },
+    };
+    
+    // For this test, we'll just call ensureGlobalGitignore via a workaround
+    // by creating a simple git repo and worktree
+    const repoDir = path.join(testDir, 'repo');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync('git init', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.name "Test User"', { cwd: repoDir, stdio: 'ignore' });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Test');
+    execSync('git add README.md', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git commit -m "init"', { cwd: repoDir, stdio: 'ignore' });
+    
+    const mockPi = {
+      exec: async (cmd: string, args: string[], _opts: unknown) => {
+        const fullCmd = `${cmd} ${args.join(' ')}`;
+        const result = execSync(fullCmd, { cwd: repoDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
+        return { code: 0, stdout: result, stderr: '' };
+      }
+    };
+    
+    // Call createAutoresearchWorktree which triggers ensureGlobalGitignore
+    const result = await gitModule.createAutoresearchWorktree(mockPi as any, repoDir, 'test');
+    expect(result).not.toBeNull();
+    
+    // Check that ~/.gitignore was created with the pattern
+    const gitignorePath = path.join(homeDir, '.gitignore');
+    expect(fs.existsSync(gitignorePath)).toBe(true);
+    
+    const content = fs.readFileSync(gitignorePath, 'utf-8');
+    expect(content).toContain('autoresearch/');
+    expect(content).toContain('# pi-autoresearch worktrees');
+  });
+
+  it("appends to existing global gitignore if pattern not present", async () => {
+    const gitignorePath = path.join(homeDir, '.gitignore');
+    
+    // Create existing gitignore before any module import
+    fs.writeFileSync(gitignorePath, '*.log\nnode_modules/\n');
+    
+    // Import the module which runs ensureGlobalGitignore on module load
+    // (since we have other tests that may have already loaded it, we need to 
+    //  test this more carefully by calling the function indirectly)
+    const gitModule = await import('../src/git/index.js');
+    
+    // Create a repo and worktree to trigger ensureGlobalGitignore
+    const repoDir = path.join(testDir, 'repo2');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync('git init', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.name "Test User"', { cwd: repoDir, stdio: 'ignore' });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Test');
+    execSync('git add README.md', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git commit -m "init"', { cwd: repoDir, stdio: 'ignore' });
+    
+    const mockPi = {
+      exec: async (cmd: string, args: string[], _opts: unknown) => {
+        const fullCmd = `${cmd} ${args.join(' ')}`;
+        try {
+          const result = execSync(fullCmd, { cwd: repoDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
+          return { code: 0, stdout: result, stderr: '' };
+        } catch {
+          return { code: 1, stdout: '', stderr: '' };
+        }
+      }
+    };
+    
+    await gitModule.createAutoresearchWorktree(mockPi as any, repoDir, 'test2');
+    
+    const content = fs.readFileSync(gitignorePath, 'utf-8');
+    expect(content).toContain('*.log');
+    expect(content).toContain('node_modules/');
+    expect(content).toContain('autoresearch/');
+  });
+
+  it("does not duplicate pattern if already present", async () => {
+    const gitignorePath = path.join(homeDir, '.gitignore');
+    
+    // Create existing gitignore with pattern already there
+    fs.writeFileSync(gitignorePath, '# pi-autoresearch worktrees\nautoresearch/\n');
+    
+    const gitModule = await import('../src/git/index.js');
+    
+    // Create a repo and worktree
+    const repoDir = path.join(testDir, 'repo3');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync('git init', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.name "Test User"', { cwd: repoDir, stdio: 'ignore' });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Test');
+    execSync('git add README.md', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git commit -m "init"', { cwd: repoDir, stdio: 'ignore' });
+    
+    const mockPi = {
+      exec: async (cmd: string, args: string[], _opts: unknown) => {
+        const fullCmd = `${cmd} ${args.join(' ')}`;
+        try {
+          const result = execSync(fullCmd, { cwd: repoDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
+          return { code: 0, stdout: result, stderr: '' };
+        } catch {
+          return { code: 1, stdout: '', stderr: '' };
+        }
+      }
+    };
+    
+    await gitModule.createAutoresearchWorktree(mockPi as any, repoDir, 'test3');
+    
+    const content = fs.readFileSync(gitignorePath, 'utf-8');
+    const matches = content.match(/autoresearch\//g);
+    expect(matches?.length).toBe(1); // Only one occurrence
+  });
+
+  it("respects custom core.excludesfile config", async () => {
+    const customGitignore = path.join(homeDir, '.my-custom-gitignore');
+    
+    // Set custom excludesfile
+    execSync(`git config --global core.excludesfile "${customGitignore}"`, { stdio: 'ignore' });
+    
+    const gitModule = await import('../src/git/index.js');
+    
+    // Create a repo and worktree
+    const repoDir = path.join(testDir, 'repo4');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execSync('git init', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.name "Test User"', { cwd: repoDir, stdio: 'ignore' });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Test');
+    execSync('git add README.md', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git commit -m "init"', { cwd: repoDir, stdio: 'ignore' });
+    
+    const mockPi = {
+      exec: async (cmd: string, args: string[], _opts: unknown) => {
+        const fullCmd = `${cmd} ${args.join(' ')}`;
+        try {
+          const result = execSync(fullCmd, { cwd: repoDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
+          return { code: 0, stdout: result, stderr: '' };
+        } catch {
+          return { code: 1, stdout: '', stderr: '' };
+        }
+      }
+    };
+    
+    await gitModule.createAutoresearchWorktree(mockPi as any, repoDir, 'test4');
+    
+    // Should use custom location
+    expect(fs.existsSync(customGitignore)).toBe(true);
+    const content = fs.readFileSync(customGitignore, 'utf-8');
+    expect(content).toContain('autoresearch/');
   });
 });
