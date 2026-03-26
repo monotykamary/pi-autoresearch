@@ -72,7 +72,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
   // Register tools
   registerRedirectedFileTools(pi, getRuntime);
-  registerInitExperiment(pi, { pi, getRuntime, getSessionKey, startWatcher: (extCtx) => startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget) });
+  registerInitExperiment(pi, { pi, getRuntime, getSessionKey, startWatcher });
   registerRunExperiment(pi, {
     pi,
     getRuntime,

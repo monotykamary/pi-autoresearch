@@ -6,7 +6,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { Text } from "@mariozechner/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { AutoresearchRuntime, ExperimentResult, LogDetails } from "../types/index.js";
+import type { AutoresearchRuntime, ExperimentResult, LogDetails, MetricDef } from "../types/index.js";
 import { LogParams } from "./schemas.js";
 import {
   formatNum,
@@ -368,6 +368,7 @@ export function registerLogExperiment(
         details: {
           experiment: { ...experiment, metrics: { ...experiment.metrics } },
           wallClockSeconds,
+          state: { ...state },
         } as LogDetails,
       };
     },
@@ -445,7 +446,7 @@ export function registerLogExperiment(
       if (Object.keys(exp.metrics).length > 0) {
         const parts: string[] = [];
         for (const [name, value] of Object.entries(exp.metrics)) {
-          const def = s.secondaryMetrics.find((m) => m.name === name);
+          const def = s.secondaryMetrics.find((m: MetricDef) => m.name === name);
           parts.push(`${name}=${formatNum(value, def?.unit ?? "")}`);
         }
         text += theme.fg("dim", `  ${parts.join(" ")}`);

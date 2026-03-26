@@ -76,6 +76,7 @@ export interface RunDetails {
 export interface LogDetails {
   experiment: ExperimentResult;
   wallClockSeconds: number | null;
+  state: ExperimentState;
 }
 
 export interface AutoresearchRuntime {

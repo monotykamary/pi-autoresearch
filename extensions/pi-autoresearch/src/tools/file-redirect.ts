@@ -9,9 +9,9 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
-  createReadToolDefinition,
-  createEditToolDefinition,
-  createWriteToolDefinition,
+  createReadTool,
+  createEditTool,
+  createWriteTool,
   type ReadOperations,
   type EditOperations,
   type WriteOperations,
@@ -144,34 +144,35 @@ export function registerRedirectedFileTools(
 ) {
   // Register read tool with redirected operations
   pi.registerTool({
-    ...createReadToolDefinition(""),
+    ...createReadTool(""),
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       const runtime = getRuntime(ctx);
       const ops = createReadOperations(ctx.cwd, runtime);
-      const tool = createReadToolDefinition(ctx.cwd, { operations: ops });
-      return tool.execute(toolCallId, params, signal, onUpdate, ctx);
+      const tool = createReadTool(ctx.cwd, { operations: ops });
+      // AgentTool.execute has 4 params, we ignore ctx for the inner tool call
+      return tool.execute(toolCallId, params, signal, onUpdate) as ReturnType<Parameters<typeof pi.registerTool>[0]['execute']>;
     },
   });
 
   // Register edit tool with redirected operations
   pi.registerTool({
-    ...createEditToolDefinition(""),
+    ...createEditTool(""),
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       const runtime = getRuntime(ctx);
       const ops = createEditOperations(ctx.cwd, runtime);
-      const tool = createEditToolDefinition(ctx.cwd, { operations: ops });
-      return tool.execute(toolCallId, params, signal, onUpdate, ctx);
+      const tool = createEditTool(ctx.cwd, { operations: ops });
+      return tool.execute(toolCallId, params, signal, onUpdate) as ReturnType<Parameters<typeof pi.registerTool>[0]['execute']>;
     },
   });
 
   // Register write tool with redirected operations
   pi.registerTool({
-    ...createWriteToolDefinition(""),
+    ...createWriteTool(""),
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       const runtime = getRuntime(ctx);
       const ops = createWriteOperations(ctx.cwd, runtime);
-      const tool = createWriteToolDefinition(ctx.cwd, { operations: ops });
-      return tool.execute(toolCallId, params, signal, onUpdate, ctx);
+      const tool = createWriteTool(ctx.cwd, { operations: ops });
+      return tool.execute(toolCallId, params, signal, onUpdate) as ReturnType<Parameters<typeof pi.registerTool>[0]['execute']>;
     },
   });
 }
