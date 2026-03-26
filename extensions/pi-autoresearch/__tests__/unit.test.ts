@@ -732,6 +732,12 @@ function resolveAutoresearchPath(
   const worktreeDir = runtime.worktreeDir;
 
   if (path.isAbsolute(inputPath)) {
+    // If path is already within worktree, use as-is (don't double-redirect)
+    const relativeToWorktree = path.relative(worktreeDir, inputPath);
+    if (!relativeToWorktree.startsWith("..") && !path.isAbsolute(relativeToWorktree)) {
+      return inputPath;
+    }
+
     // Check if inputPath is within ctxCwd using path.relative
     // If relative path starts with "..", it's outside ctxCwd
     const relativeToCwd = path.relative(ctxCwd, inputPath);
@@ -829,6 +835,35 @@ describe("File redirection path resolution", () => {
 
     const resolved = resolveAutoresearchPath("/project/package.json", mainCwd, runtime);
     expect(resolved).toBe("/project/autoresearch/session-123/package.json");
+  });
+
+  it("preserves paths already within worktree (no double redirect)", () => {
+    const runtime: AutoresearchRuntime = {
+      autoresearchMode: true,
+      worktreeDir,
+    };
+
+    // Path that is already within the worktree - should not be redirected again
+    const inputPath = "/project/autoresearch/session-123/src/foo.ts";
+    const resolved = resolveAutoresearchPath(inputPath, mainCwd, runtime);
+    
+    // Should return as-is, NOT .../autoresearch/session-123/autoresearch/session-123/...
+    expect(resolved).toBe("/project/autoresearch/session-123/src/foo.ts");
+  });
+
+  it("preserves autoresearch.md path when already in worktree", () => {
+    const runtime: AutoresearchRuntime = {
+      autoresearchMode: true,
+      worktreeDir,
+    };
+
+    // Simulates the bug from the screenshot - LLM passes full path to worktree file
+    const inputPath = "/project/autoresearch/session-123/autoresearch.md";
+    const resolved = resolveAutoresearchPath(inputPath, mainCwd, runtime);
+    
+    // Should not duplicate the worktree path
+    expect(resolved).toBe("/project/autoresearch/session-123/autoresearch.md");
+    expect(resolved).not.toContain("autoresearch/session-123/autoresearch/session-123");
   });
 });
 

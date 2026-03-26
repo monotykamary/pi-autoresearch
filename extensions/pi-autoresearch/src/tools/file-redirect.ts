@@ -33,6 +33,12 @@ function resolveAutoresearchPath(
   const worktreeDir = runtime.worktreeDir;
 
   if (path.isAbsolute(inputPath)) {
+    // If path is already within worktree, use as-is (don't double-redirect)
+    const relativeToWorktree = path.relative(worktreeDir, inputPath);
+    if (!relativeToWorktree.startsWith("..") && !path.isAbsolute(relativeToWorktree)) {
+      return inputPath;
+    }
+
     // Check if inputPath is within ctxCwd using path.relative
     // If relative path starts with "..", it's outside ctxCwd
     const relativeToCwd = path.relative(ctxCwd, inputPath);
