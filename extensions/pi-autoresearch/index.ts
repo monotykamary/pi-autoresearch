@@ -530,7 +530,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   // Register tools
   // -----------------------------------------------------------------------
 
-  registerInitExperiment(pi, { pi, getRuntime, updateWidget });
+  registerInitExperiment(pi, { pi, getRuntime, updateWidget, getSessionKey });
   registerRunExperiment(pi, { pi, getRuntime, updateWidget, overlayTui });
   registerLogExperiment(pi, { pi, getRuntime, updateWidget, overlayTui });
 

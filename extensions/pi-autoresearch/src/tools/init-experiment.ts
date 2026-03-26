@@ -8,13 +8,14 @@ import { Text } from "@mariozechner/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AutoresearchRuntime, ExperimentState } from "../types/index.js";
 import { InitParams } from "./schemas.js";
-import { resolveWorkDir, validateWorkDir, readMaxExperiments } from "../git/index.js";
+import { resolveWorkDir, validateWorkDir, readMaxExperiments, createAutoresearchWorktree, getDisplayWorktreePath } from "../git/index.js";
 import { cloneExperimentState, resetForReinit } from "../state/index.js";
 
 interface InitToolContext {
   pi: ExtensionAPI;
   getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime;
   updateWidget: (ctx: ExtensionContext) => void;
+  getSessionKey: (ctx: ExtensionContext) => string;
 }
 
 export function registerInitExperiment(
@@ -38,6 +39,20 @@ export function registerInitExperiment(
     async execute(_toolCallId, params, _signal, _onUpdate, extCtx) {
       const runtime = ctx.getRuntime(extCtx);
       const state = runtime.state;
+
+      // Auto-create worktree if not already exists (for direct tool calls without /autoresearch)
+      let worktreeCreated = false;
+      if (!runtime.worktreeDir) {
+        const worktreePath = await createAutoresearchWorktree(
+          ctx.pi,
+          extCtx.cwd,
+          ctx.getSessionKey(extCtx)
+        );
+        if (worktreePath) {
+          runtime.worktreeDir = worktreePath;
+          worktreeCreated = true;
+        }
+      }
 
       // Validate working directory exists
       const workDirError = validateWorkDir(extCtx.cwd, runtime);
@@ -103,12 +118,15 @@ export function registerInitExperiment(
         state.maxExperiments !== null
           ? `\nMax iterations: ${state.maxExperiments} (from autoresearch.config.json)`
           : "";
+      const worktreeNote = worktreeCreated
+        ? `\n📁 Created isolated worktree: ${getDisplayWorktreePath(extCtx.cwd, runtime.worktreeDir!)}`
+        : "";
       const workDirNote = workDir !== extCtx.cwd ? `\nWorking directory: ${workDir}` : "";
       return {
         content: [
           {
             type: "text",
-            text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
+            text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${worktreeNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
           },
         ],
         details: { state: cloneExperimentState(state) },
