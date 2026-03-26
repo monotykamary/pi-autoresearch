@@ -52,6 +52,7 @@ export function createSessionRuntime(): AutoresearchRuntime {
     runningExperiment: null,
     state: createExperimentState(),
     worktreeDir: null,
+    startingCommit: null,
   };
 }
 

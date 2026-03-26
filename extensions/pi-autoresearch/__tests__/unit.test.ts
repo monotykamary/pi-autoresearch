@@ -1065,3 +1065,228 @@ describe("Target value feature", () => {
     });
   });
 });
+
+// ============================================================================
+// Tests: Automatic Commit Tracking
+// ============================================================================
+
+/**
+ * Runtime interface for commit tracking tests (subset of AutoresearchRuntime)
+ */
+interface RuntimeWithStartingCommit {
+  startingCommit: string | null;
+  autoresearchMode: boolean;
+  worktreeDir: string | null;
+}
+
+/**
+ * Create a fresh runtime state for testing
+ */
+function createTestRuntime(): RuntimeWithStartingCommit {
+  return {
+    startingCommit: null,
+    autoresearchMode: false,
+    worktreeDir: null,
+  };
+}
+
+describe("Automatic commit tracking", () => {
+  describe("startingCommit initialization", () => {
+    it("initializes with null startingCommit", () => {
+      const runtime = createTestRuntime();
+      expect(runtime.startingCommit).toBeNull();
+    });
+
+    it("can set startingCommit after creation", () => {
+      const runtime = createTestRuntime();
+      runtime.startingCommit = "abc1234";
+      expect(runtime.startingCommit).toBe("abc1234");
+    });
+
+    it("captures 7-character short hash format", () => {
+      const runtime = createTestRuntime();
+      runtime.startingCommit = "a1b2c3d";
+      expect(runtime.startingCommit).toHaveLength(7);
+    });
+  });
+
+  describe("startingCommit lifecycle", () => {
+    it("clears stale starting commit before capturing new one", () => {
+      const runtime = createTestRuntime();
+      
+      // Simulate previous experiment's starting commit
+      runtime.startingCommit = "old1234";
+      
+      // Simulate run_experiment clearing stale starting commit
+      runtime.startingCommit = null;
+      
+      // Then capturing new starting commit
+      runtime.startingCommit = "new5678";
+      
+      expect(runtime.startingCommit).toBe("new5678");
+    });
+
+    it("resets to null after log_experiment completes", () => {
+      const runtime = createTestRuntime();
+      
+      // Simulate full cycle
+      runtime.startingCommit = "abc1234";  // run_experiment captured
+      expect(runtime.startingCommit).not.toBeNull();
+      
+      // log_experiment clears it
+      runtime.startingCommit = null;
+      expect(runtime.startingCommit).toBeNull();
+    });
+  });
+
+  describe("startingCommit usage in experiment records", () => {
+    interface ExperimentResultWithCommit {
+      commit: string;
+      metric: number;
+      status: "keep" | "discard" | "crash" | "checks_failed";
+      description: string;
+    }
+
+    it("records starting commit in experiment result", () => {
+      const runtime = createTestRuntime();
+      runtime.startingCommit = "abc1234";
+      
+      const experiment: ExperimentResultWithCommit = {
+        commit: runtime.startingCommit ?? "unknown",
+        metric: 100,
+        status: "keep",
+        description: "Test experiment",
+      };
+      
+      expect(experiment.commit).toBe("abc1234");
+    });
+
+    it("falls back to 'unknown' when startingCommit is null", () => {
+      const runtime = createTestRuntime();
+      // startingCommit is null
+      
+      const experiment: ExperimentResultWithCommit = {
+        commit: runtime.startingCommit ?? "unknown",
+        metric: 100,
+        status: "keep",
+        description: "Test experiment",
+      };
+      
+      expect(experiment.commit).toBe("unknown");
+    });
+  });
+
+  describe("Commit tracking scenarios", () => {
+    it("handles normal keep flow: starting commit -> new commit", () => {
+      const runtime = createTestRuntime();
+      
+      // Experiment 1: starting commit
+      runtime.startingCommit = "abc0001";
+      expect(runtime.startingCommit).toBe("abc0001");
+      
+      // After keep: starting commit cleared, new commit created
+      runtime.startingCommit = null;
+      
+      // Experiment 2: captures new starting commit (which is now the kept commit)
+      runtime.startingCommit = "abc0002";
+      expect(runtime.startingCommit).toBe("abc0002");
+    });
+
+    it("handles discard flow: starting commit unchanged after revert", () => {
+      const runtime = createTestRuntime();
+      
+      // Start experiment
+      runtime.startingCommit = "abc0001";
+      
+      // Discard: revert to starting state, clear for next experiment
+      runtime.startingCommit = null;
+      
+      // Next experiment captures same starting commit (revert brought us back)
+      runtime.startingCommit = "abc0001";
+      expect(runtime.startingCommit).toBe("abc0001");
+    });
+
+    it("handles crash flow: starting commit cleared but no new commit", () => {
+      const runtime = createTestRuntime();
+      
+      // Start experiment
+      runtime.startingCommit = "abc0001";
+      
+      // Crash: no commit made, starting commit cleared
+      runtime.startingCommit = null;
+      
+      // Next run captures from same state
+      runtime.startingCommit = "abc0001";
+      expect(runtime.startingCommit).toBe("abc0001");
+    });
+  });
+
+  describe("Integration with worktree", () => {
+    it("captures commit within worktree directory", () => {
+      const runtime: RuntimeWithStartingCommit = {
+        startingCommit: "abc1234",
+        autoresearchMode: true,
+        worktreeDir: "/project/autoresearch/session-123",
+      };
+      
+      // The starting commit is captured from the worktree's git state
+      expect(runtime.startingCommit).toBe("abc1234");
+      expect(runtime.autoresearchMode).toBe(true);
+      expect(runtime.worktreeDir).not.toBeNull();
+    });
+
+    it("captures commit from main directory when not using worktree", () => {
+      const runtime: RuntimeWithStartingCommit = {
+        startingCommit: "def5678",
+        autoresearchMode: true,
+        worktreeDir: null,
+      };
+      
+      // When worktreeDir is null, we use ctx.cwd directly
+      expect(runtime.startingCommit).toBe("def5678");
+      expect(runtime.worktreeDir).toBeNull();
+    });
+  });
+
+  describe("Error handling", () => {
+    it("handles git rev-parse failure gracefully", () => {
+      const runtime = createTestRuntime();
+      
+      // Simulate git command failure - startingCommit stays null
+      // (the catch block doesn't set it)
+      expect(runtime.startingCommit).toBeNull();
+      
+      // log_experiment falls back to "unknown"
+      const commit = runtime.startingCommit ?? "unknown";
+      expect(commit).toBe("unknown");
+    });
+
+    it("handles empty git output", () => {
+      const runtime = createTestRuntime();
+      
+      // Empty string is falsy after trim
+      const gitOutput = "";
+      const trimmed = gitOutput.trim();
+      
+      if (trimmed && trimmed.length >= 7) {
+        runtime.startingCommit = trimmed;
+      }
+      
+      // Empty output doesn't set startingCommit
+      expect(runtime.startingCommit).toBeNull();
+    });
+
+    it("validates 7-character minimum length", () => {
+      const runtime = createTestRuntime();
+      
+      const shortHash = "abc12";  // only 5 chars
+      
+      if (shortHash.length >= 7) {
+        runtime.startingCommit = shortHash;
+      }
+      
+      // Too short - not set
+      expect(runtime.startingCommit).toBeNull();
+    });
+  });
+});

@@ -41,7 +41,7 @@ export function registerLogExperiment(
     label: "Log Experiment",
     description:
       "Record an experiment result. Tracks metrics, updates the status widget and dashboard. Call after every run_experiment.",
-    promptSnippet: "Log experiment result (commit, metric, status, description)",
+    promptSnippet: "Log experiment result (metric, status, description)",
     promptGuidelines: [
       "Always call log_experiment after run_experiment to record the result.",
       "log_experiment automatically runs git add -A && git commit on 'keep', and auto-reverts code changes on 'discard'/'crash'/'checks_failed' (autoresearch files are preserved). Do NOT commit or revert manually.",
@@ -137,8 +137,26 @@ export function registerLogExperiment(
           ? (params.asi as Record<string, unknown>)
           : undefined;
 
+      // Use the starting commit captured by run_experiment (the starting point of this experiment)
+      // This is recorded for reference only - actual revert uses git checkout to reset working tree
+      let commitHash = runtime.startingCommit ?? "unknown";
+      if (commitHash === "unknown") {
+        try {
+          const shaResult = await pi.exec(
+            "git",
+            ["rev-parse", "--short=7", "HEAD"],
+            { cwd: workDir, timeout: 5000 }
+          );
+          if (shaResult.code === 0) {
+            commitHash = (shaResult.stdout || "").trim().slice(0, 7);
+          }
+        } catch {
+          // Keep "unknown" if git fails
+        }
+      }
+
       const experiment: ExperimentResult = {
-        commit: params.commit.slice(0, 7),
+        commit: commitHash,
         metric: params.metric,
         metrics: secondaryMetrics,
         status: params.status,
@@ -317,11 +335,12 @@ export function registerLogExperiment(
         }
       }
 
-      // Clear running experiment and checks state
+      // Clear running experiment and checks state, and reset starting commit
       const wallClockSeconds = runtime.lastRunDuration;
       runtime.runningExperiment = null;
       runtime.lastRunChecks = null;
       runtime.lastRunDuration = null;
+      runtime.startingCommit = null;
 
       // Check if max experiments limit reached
       const limitReached =

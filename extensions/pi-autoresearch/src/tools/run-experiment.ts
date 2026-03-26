@@ -99,6 +99,25 @@ export function registerRunExperiment(
 
       const timeout = (params.timeout_seconds ?? 600) * 1000;
 
+      // Clear any stale starting commit and capture fresh one BEFORE running
+      // This ensures we always record the correct starting point for this experiment
+      runtime.startingCommit = null;
+
+      // Capture starting commit BEFORE running the experiment (before any AI modifications)
+      // This commit is recorded in the experiment result for reference
+      try {
+        const shaResult = await pi.exec(
+          "git",
+          ["rev-parse", "--short=7", "HEAD"],
+          { cwd: workDir, timeout: 5000 }
+        );
+        if (shaResult.code === 0) {
+          runtime.startingCommit = (shaResult.stdout || "").trim();
+        }
+      } catch {
+        // If git fails, leave startingCommit as null (log_experiment will handle gracefully)
+      }
+
       // Guard: if autoresearch.sh exists, only allow running it
       const autoresearchShPath = path.join(workDir, "autoresearch.sh");
       if (

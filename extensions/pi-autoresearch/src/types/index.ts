@@ -91,6 +91,8 @@ export interface AutoresearchRuntime {
   state: ExperimentState;
   /** Path to the session-specific git worktree for isolation, or null if not using worktree */
   worktreeDir: string | null;
+  /** Git commit hash captured at run_experiment entry (before AI modifications). Used by log_experiment for the experiment record. */
+  startingCommit: string | null;
 }
 
 export interface AutoresearchConfig {

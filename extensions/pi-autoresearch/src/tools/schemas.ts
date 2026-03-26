@@ -53,7 +53,6 @@ export const InitParams = Type.Object({
 });
 
 export const LogParams = Type.Object({
-  commit: Type.String({ description: "Git commit hash (short, 7 chars)" }),
   metric: Type.Number({
     description:
       "The primary optimization metric value (e.g. seconds, val_bpb). 0 for crashes.",
@@ -77,7 +76,7 @@ export const LogParams = Type.Object({
   asi: Type.Optional(
     Type.Record(Type.String(), Type.Unknown(), {
       description:
-        'Actionable Side Information — structured diagnostics for this run. Free-form key/value pairs. Parsed ASI from run_experiment output is merged automatically; use this to add or override fields.',
+        "Actionable Side Information — structured diagnostics for this run. Free-form key/value pairs. Parsed ASI from run_experiment output is merged automatically; use this to add or override fields.",
     })
   ),
 });
