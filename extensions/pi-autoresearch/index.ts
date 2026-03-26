@@ -226,11 +226,14 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
           // Show secondary metrics with delta %
           if (state.secondaryMetrics.length > 0) {
+            parts.push(theme.fg("dim", " │ "));
             for (const sm of state.secondaryMetrics) {
               const val = bestSec[sm.name];
               const bv = baselineSec[sm.name];
               if (val !== undefined) {
-                parts.push(theme.fg("dim", "  "));
+                if (parts[parts.length - 1] !== theme.fg("dim", " │ ")) {
+                  parts.push(theme.fg("dim", "  "));
+                }
                 parts.push(theme.fg("muted", `${sm.name}: ${formatNum(val, sm.unit)}`));
                 if (bv !== undefined && bv !== 0 && val !== bv) {
                   const p = ((val - bv) / bv) * 100;
