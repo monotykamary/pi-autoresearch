@@ -87,6 +87,8 @@ export interface AutoresearchRuntime {
   autoResumeTurns: number;
   lastRunChecks: { pass: boolean; output: string; duration: number } | null;
   lastRunDuration: number | null;
+  /** Whether the last run succeeded (for widget state display). null if no run yet. */
+  lastRunSucceeded: boolean | null;
   runningExperiment: { startedAt: number; command: string } | null;
   /** True when run_experiment finished but log_experiment hasn't been called yet */
   experimentCompletedWaitingForLog: boolean;

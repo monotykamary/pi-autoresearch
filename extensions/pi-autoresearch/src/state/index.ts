@@ -49,6 +49,7 @@ export function createSessionRuntime(): AutoresearchRuntime {
     autoResumeTurns: 0,
     lastRunChecks: null,
     lastRunDuration: null,
+    lastRunSucceeded: null,
     runningExperiment: null,
     experimentCompletedWaitingForLog: false,
     state: createExperimentState(),

@@ -360,12 +360,13 @@ export function registerRunExperiment(
 
       const passed = benchmarkPassed && (checksPass === null || checksPass);
 
-      // Only show "done" state for successful runs (crashes should not show "done")
-      if (passed) {
-        runtime.experimentCompletedWaitingForLog = true;
-        ctx.updateWidget(extCtx);
-        if (ctx.overlayTui) ctx.overlayTui.requestRender();
-      }
+      // Set flag for post-experiment state (success or failure — both need log_experiment)
+      runtime.experimentCompletedWaitingForLog = true;
+      ctx.updateWidget(extCtx);
+      if (ctx.overlayTui) ctx.overlayTui.requestRender();
+
+      // Track if the run succeeded (for widget state display)
+      runtime.lastRunSucceeded = passed;
 
       // Reuse streaming temp file if it exists, otherwise create one for large output
       let fullOutputPath: string | undefined = streamTempFile;

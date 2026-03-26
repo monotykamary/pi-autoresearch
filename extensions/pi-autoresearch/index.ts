@@ -124,10 +124,13 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
     // State 2: After run_experiment, before log_experiment — finished, needs logging
     if (runtime.experimentCompletedWaitingForLog) {
+      const succeeded = runtime.lastRunSucceeded;
       ctx.ui.setWidget("autoresearch", (_tui, theme) => {
         const parts = [
           theme.fg("accent", "🔬"),
-          theme.fg("text", " done"),
+          succeeded 
+            ? theme.fg("text", " done") 
+            : theme.fg("error", " failed"),
           theme.fg("dim", " — call log_experiment"),
         ];
 
@@ -322,6 +325,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     runtime.lastRunDuration = null;
     runtime.runningExperiment = null;
     runtime.experimentCompletedWaitingForLog = false;
+    runtime.lastRunSucceeded = null;
     runtime.lastAutoResumeTime = 0;
     runtime.experimentsThisSession = 0;
     runtime.autoResumeTurns = 0;
@@ -510,6 +514,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     const runtime = getRuntime(ctx);
     runtime.runningExperiment = null;
     runtime.experimentCompletedWaitingForLog = false;
+    runtime.lastRunSucceeded = null;
     if (overlayTui) overlayTui.requestRender();
 
     if (!runtime.autoresearchMode) return;

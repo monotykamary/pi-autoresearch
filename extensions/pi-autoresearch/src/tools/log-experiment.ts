@@ -339,6 +339,7 @@ export function registerLogExperiment(
       const wallClockSeconds = runtime.lastRunDuration;
       runtime.runningExperiment = null;
       runtime.experimentCompletedWaitingForLog = false;
+      runtime.lastRunSucceeded = null;
       runtime.lastRunChecks = null;
       runtime.lastRunDuration = null;
       runtime.startingCommit = null;
