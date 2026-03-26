@@ -119,7 +119,7 @@ export function resolveWorkDir(
 }
 
 /** Detect autoresearch worktree by looking for autoresearch.jsonl in git worktrees */
-export function detectAutoresearchWorktree(ctxCwd: string): string | null {
+export function detectAutoresearchWorktree(ctxCwd: string, sessionId?: string): string | null {
   try {
     // List all worktrees
     const output = execSync("git worktree list --porcelain", {
@@ -133,6 +133,15 @@ export function detectAutoresearchWorktree(ctxCwd: string): string | null {
       // Porcelain format: "worktree <path>"
       if (line.startsWith("worktree ")) {
         const worktreePath = line.slice(9).trim();
+        
+        // If sessionId provided, only match worktrees for that session
+        if (sessionId) {
+          const expectedSuffix = path.join("autoresearch", sessionId);
+          if (!worktreePath.endsWith(expectedSuffix)) {
+            continue;  // Skip worktrees for other sessions
+          }
+        }
+        
         // Check if this worktree has autoresearch.jsonl
         const jsonlPath = path.join(worktreePath, "autoresearch.jsonl");
         if (fs.existsSync(jsonlPath)) {

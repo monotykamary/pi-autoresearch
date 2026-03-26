@@ -137,9 +137,9 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
       runtime.autoresearchMode = true;
       runtime.autoResumeTurns = 0;
 
-      // Try to detect existing worktree first
+      // Try to detect existing worktree first (only for current session)
       if (!runtime.worktreeDir) {
-        const detectedWorktree = detectAutoresearchWorktree(extCtx.cwd);
+        const detectedWorktree = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
         if (detectedWorktree) {
           runtime.worktreeDir = detectedWorktree;
           const displayPath = getDisplayWorktreePath(extCtx.cwd, detectedWorktree);

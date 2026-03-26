@@ -201,7 +201,7 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     const runtime = getRuntime(extCtx);
     if (!runtime.worktreeDir) {
       const { detectAutoresearchWorktree } = await import("../git/index.js");
-      const detected = detectAutoresearchWorktree(extCtx.cwd);
+      const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
       if (detected) {
         runtime.worktreeDir = detected;
       }
@@ -214,7 +214,7 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     const runtime = getRuntime(extCtx);
     if (!runtime.worktreeDir) {
       const { detectAutoresearchWorktree } = await import("../git/index.js");
-      const detected = detectAutoresearchWorktree(extCtx.cwd);
+      const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
       if (detected) {
         runtime.worktreeDir = detected;
       }
@@ -227,7 +227,7 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     const runtime = getRuntime(extCtx);
     if (!runtime.worktreeDir) {
       const { detectAutoresearchWorktree } = await import("../git/index.js");
-      const detected = detectAutoresearchWorktree(extCtx.cwd);
+      const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
       if (detected) {
         runtime.worktreeDir = detected;
       }

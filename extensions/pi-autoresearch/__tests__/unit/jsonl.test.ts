@@ -38,7 +38,7 @@ describe("detectAutoresearchWorktree", () => {
     expect(result).toBeNull();
   });
 
-  it("detects worktree with autoresearch.jsonl", async () => {
+  it("detects worktree with autoresearch.jsonl for specific session", async () => {
     const sessionId = "test-detect-session";
     const worktreePath = path.join(repoDir, "autoresearch", sessionId);
     const branchName = `autoresearch/${sessionId}`;
@@ -50,14 +50,23 @@ describe("detectAutoresearchWorktree", () => {
     fs.writeFileSync(path.join(worktreePath, "autoresearch.jsonl"), '{"name":"Test"}\n');
 
     const { detectAutoresearchWorktree } = await import("../../src/git/index.js");
-    const result = detectAutoresearchWorktree(repoDir);
-    // On macOS, git may return /private/var/... while we construct /var/...
-    expect(result).not.toBeNull();
-    expect(result).toContain("autoresearch/test-detect-session");
-    expect(fs.existsSync(path.join(result!, "autoresearch.jsonl"))).toBe(true);
+    
+    // Without sessionId - should still find it (backward compat / any session mode)
+    const resultAny = detectAutoresearchWorktree(repoDir);
+    expect(resultAny).not.toBeNull();
+    
+    // With matching sessionId - should find it
+    const resultSpecific = detectAutoresearchWorktree(repoDir, sessionId);
+    expect(resultSpecific).not.toBeNull();
+    expect(resultSpecific).toContain("autoresearch/test-detect-session");
+    expect(fs.existsSync(path.join(resultSpecific!, "autoresearch.jsonl"))).toBe(true);
+    
+    // With wrong sessionId - should NOT find it
+    const resultWrong = detectAutoresearchWorktree(repoDir, "wrong-session");
+    expect(resultWrong).toBeNull();
   });
 
-  it("returns first matching worktree when multiple exist", async () => {
+  it("only returns worktree matching the requested sessionId", async () => {
     const sessionId1 = "test-session-1";
     const sessionId2 = "test-session-2";
     const worktreePath1 = path.join(repoDir, "autoresearch", sessionId1);
@@ -70,15 +79,24 @@ describe("detectAutoresearchWorktree", () => {
     execSync(`git worktree add ${worktreePath1} ${branchName1}`, { cwd: repoDir, stdio: "ignore" });
     execSync(`git worktree add ${worktreePath2} ${branchName2}`, { cwd: repoDir, stdio: "ignore" });
 
-    // Create autoresearch.jsonl only in second worktree
+    // Create autoresearch.jsonl in BOTH worktrees
+    fs.writeFileSync(path.join(worktreePath1, "autoresearch.jsonl"), '{"name":"Test1"}\n');
     fs.writeFileSync(path.join(worktreePath2, "autoresearch.jsonl"), '{"name":"Test2"}\n');
 
     const { detectAutoresearchWorktree } = await import("../../src/git/index.js");
-    const result = detectAutoresearchWorktree(repoDir);
-    // On macOS, git may return /private/var/... while we construct /var/...
-    expect(result).not.toBeNull();
-    expect(result).toContain("autoresearch/test-session-2");
-    expect(fs.existsSync(path.join(result!, "autoresearch.jsonl"))).toBe(true);
+    
+    // Requesting sessionId1 should return worktreePath1, NOT worktreePath2
+    const result1 = detectAutoresearchWorktree(repoDir, sessionId1);
+    expect(result1).not.toBeNull();
+    expect(result1).toContain("autoresearch/test-session-1");
+    
+    // Requesting sessionId2 should return worktreePath2, NOT worktreePath1
+    const result2 = detectAutoresearchWorktree(repoDir, sessionId2);
+    expect(result2).not.toBeNull();
+    expect(result2).toContain("autoresearch/test-session-2");
+    
+    // Results should be different paths
+    expect(result1).not.toBe(result2);
   });
 
   it("returns null when worktrees exist but have no autoresearch.jsonl", async () => {

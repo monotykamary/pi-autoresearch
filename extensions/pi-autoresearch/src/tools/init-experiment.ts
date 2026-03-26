@@ -68,6 +68,8 @@ export function registerInitExperiment(
         };
       }
 
+      const workDir = resolveWorkDir(extCtx.cwd, runtime);
+      const jsonlPath = path.join(workDir, "autoresearch.jsonl");
       const isReinit = fs.existsSync(jsonlPath);
 
       state.name = params.name;
@@ -87,9 +89,7 @@ export function registerInitExperiment(
       state.maxExperiments = readMaxExperiments(extCtx.cwd);
 
       // Write config header to jsonl
-      const workDir = resolveWorkDir(extCtx.cwd, runtime);
       try {
-        const jsonlPath = path.join(workDir, "autoresearch.jsonl");
         const config = JSON.stringify({
           type: "config",
           name: state.name,
