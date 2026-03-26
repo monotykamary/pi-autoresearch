@@ -779,6 +779,12 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         return;
       }
 
+      // Guard against duplicate activation
+      if (runtime.autoresearchMode) {
+        ctx.ui.notify("Autoresearch already active — use '/autoresearch off' to stop first", "info");
+        return;
+      }
+
       runtime.autoresearchMode = true;
       runtime.autoResumeTurns = 0;
 

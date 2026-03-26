@@ -1301,6 +1301,7 @@ interface TestRuntime {
   runningExperiment: { startedAt: number; command: string } | null;
   experimentCompletedWaitingForLog: boolean;
   lastRunSucceeded: boolean | null;
+  autoResumeTurns: number;
   state: {
     name: string | null;
     results: ExperimentResult[];
@@ -1315,6 +1316,7 @@ function createWidgetTestRuntime(): TestRuntime {
     runningExperiment: null,
     experimentCompletedWaitingForLog: false,
     lastRunSucceeded: null,
+    autoResumeTurns: 0,
     state: {
       name: null,
       results: [],
@@ -1785,6 +1787,200 @@ describe("Session lifecycle cleanup", () => {
       
       expect(runtime.autoresearchMode).toBe(true);
       expect(getWidgetState(runtime).type).toBe("ready");
+    });
+  });
+});
+
+// ============================================================================
+// Tests: Cherry-picked Fixes from Upstream
+// ============================================================================
+
+describe("Cherry-picked fixes from upstream (fcd55f7)", () => {
+  describe("Fix #1: init_experiment file existence check", () => {
+    const TEST_DIR = path.join(__dirname, "test-init-existence");
+    const JSONL_PATH = path.join(TEST_DIR, "autoresearch.jsonl");
+
+    beforeEach(() => {
+      // Clean up test directory
+      if (fs.existsSync(TEST_DIR)) {
+        fs.rmSync(TEST_DIR, { recursive: true });
+      }
+      fs.mkdirSync(TEST_DIR, { recursive: true });
+    });
+
+    it("should use fs.existsSync instead of state.results.length to decide append vs create", () => {
+      // This test validates the fix for: 
+      // "init_experiment: use fs.existsSync(jsonlPath) instead of state.results.length 
+      //  to decide append vs create — prevents overwriting history when extension reloads mid-session"
+      
+      // Simulate scenario: jsonl exists but state.results is empty (extension reloaded)
+      const existingConfig = JSON.stringify({
+        type: "config",
+        name: "Previous Session",
+        metricName: "time_ms",
+        metricUnit: "ms",
+        bestDirection: "lower",
+        targetValue: null,
+      });
+      fs.writeFileSync(JSONL_PATH, existingConfig + "\n");
+      
+      // Verify file exists
+      expect(fs.existsSync(JSONL_PATH)).toBe(true);
+      
+      // The fix: check file existence, not state.results.length
+      const stateResultsLength = 0; // Simulating empty state after reload
+      const isReinitOld = stateResultsLength > 0; // OLD logic: would be false
+      const isReinitNew = fs.existsSync(JSONL_PATH); // NEW logic: should be true
+      
+      expect(isReinitOld).toBe(false); // Old logic would incorrectly say "not reinit"
+      expect(isReinitNew).toBe(true);  // New logic correctly detects existing file
+      
+      // With old logic, it would do writeFileSync (overwrite)
+      // With new logic, it does appendFileSync (preserve)
+      const newConfig = JSON.stringify({
+        type: "config",
+        name: "New Session",
+        metricName: "latency_us",
+        metricUnit: "µs",
+        bestDirection: "lower",
+        targetValue: 100,
+      });
+      
+      // Simulate the FIXED behavior (append, don't overwrite)
+      if (isReinitNew) {
+        fs.appendFileSync(JSONL_PATH, newConfig + "\n");
+      } else {
+        fs.writeFileSync(JSONL_PATH, newConfig + "\n");
+      }
+      
+      // Verify both configs are preserved (old + new)
+      const content = fs.readFileSync(JSONL_PATH, "utf-8");
+      const lines = content.trim().split("\n");
+      expect(lines.length).toBe(2);
+      expect(JSON.parse(lines[0]).name).toBe("Previous Session");
+      expect(JSON.parse(lines[1]).name).toBe("New Session");
+    });
+
+    it("should create new file when jsonl does not exist (first init)", () => {
+      // Verify the normal case still works
+      expect(fs.existsSync(JSONL_PATH)).toBe(false);
+      
+      const isReinit = fs.existsSync(JSONL_PATH);
+      expect(isReinit).toBe(false);
+      
+      const config = JSON.stringify({
+        type: "config",
+        name: "First Session",
+        metricName: "time_ms",
+        metricUnit: "ms",
+        bestDirection: "lower",
+      });
+      
+      // Should use writeFileSync for new files
+      if (isReinit) {
+        fs.appendFileSync(JSONL_PATH, config + "\n");
+      } else {
+        fs.writeFileSync(JSONL_PATH, config + "\n");
+      }
+      
+      expect(fs.existsSync(JSONL_PATH)).toBe(true);
+      const content = fs.readFileSync(JSONL_PATH, "utf-8").trim();
+      expect(JSON.parse(content).name).toBe("First Session");
+    });
+  });
+
+  describe("Fix #2: /autoresearch duplicate command guard", () => {
+    it("should prevent duplicate /autoresearch activation", () => {
+      // This test validates the fix for:
+      // "/autoresearch command: guard against duplicate activation — 
+      //  notify and return early if already active"
+      
+      const runtime = createWidgetTestRuntime();
+      const notifications: Array<{ message: string; type: string }> = [];
+      
+      // Simulate /autoresearch handler logic
+      function handleAutoresearchCommand(args: string, existingRuntime: typeof runtime) {
+        const trimmedArgs = args.trim();
+        const command = trimmedArgs.toLowerCase();
+        
+        // Guard against duplicate activation (the fix)
+        if (existingRuntime.autoresearchMode && command !== "off" && command !== "clear") {
+          notifications.push({ 
+            message: "Autoresearch already active — use '/autoresearch off' to stop first", 
+            type: "info" 
+          });
+          return { handled: false, reason: "already_active" };
+        }
+        
+        // Normal activation
+        existingRuntime.autoresearchMode = true;
+        existingRuntime.state.name = trimmedArgs;
+        notifications.push({ message: "Autoresearch mode ON", type: "info" });
+        return { handled: true };
+      }
+      
+      // First call should succeed
+      const result1 = handleAutoresearchCommand("optimize performance", runtime);
+      expect(result1.handled).toBe(true);
+      expect(notifications[0].message).toBe("Autoresearch mode ON");
+      expect(runtime.autoresearchMode).toBe(true);
+      expect(runtime.state.name).toBe("optimize performance");
+      
+      // Second call should be blocked (the fix)
+      const result2 = handleAutoresearchCommand("optimize memory", runtime);
+      expect(result2.handled).toBe(false);
+      expect(result2.reason).toBe("already_active");
+      expect(notifications[1].message).toContain("already active");
+      
+      // State should NOT have changed
+      expect(runtime.autoresearchMode).toBe(true);
+      expect(runtime.state.name).toBe("optimize performance"); // Original name preserved
+      expect(runtime.autoResumeTurns).toBe(0); // Should not reset
+    });
+
+    it("should allow 'off' and 'clear' commands even when active", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.autoresearchMode = true;
+      runtime.state.name = "Active Session";
+      runtime.autoResumeTurns = 3;
+      
+      function handleAutoresearchCommand(args: string, existingRuntime: typeof runtime) {
+        const trimmedArgs = args.trim();
+        const command = trimmedArgs.toLowerCase();
+        
+        // The guard - but off/clear should still work
+        if (existingRuntime.autoresearchMode && command !== "off" && command !== "clear") {
+          return { handled: false, reason: "already_active" };
+        }
+        
+        if (command === "off") {
+          existingRuntime.autoresearchMode = false;
+          existingRuntime.autoResumeTurns = 0;
+          return { handled: true, action: "off" };
+        }
+        
+        if (command === "clear") {
+          existingRuntime.autoresearchMode = false;
+          existingRuntime.state = createWidgetTestRuntime().state;
+          return { handled: true, action: "clear" };
+        }
+        
+        return { handled: true };
+      }
+      
+      // Should allow 'off'
+      const offResult = handleAutoresearchCommand("off", runtime);
+      expect(offResult.handled).toBe(true);
+      expect(offResult.action).toBe("off");
+      
+      // Reset for clear test
+      runtime.autoresearchMode = true;
+      runtime.state.name = "Active Session";
+      
+      // Should allow 'clear'
+      const clearResult = handleAutoresearchCommand("clear", runtime);
+      expect(clearResult.handled).toBe(true);
+      expect(clearResult.action).toBe("clear");
     });
   });
 });

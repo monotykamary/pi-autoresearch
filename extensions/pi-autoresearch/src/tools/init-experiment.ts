@@ -68,7 +68,7 @@ export function registerInitExperiment(
         };
       }
 
-      const isReinit = state.results.length > 0;
+      const isReinit = fs.existsSync(jsonlPath);
 
       state.name = params.name;
       state.metricName = params.metric_name;
