@@ -1,0 +1,129 @@
+/**
+ * init_experiment tool implementation
+ */
+
+import * as path from "node:path";
+import * as fs from "node:fs";
+import { Text } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { AutoresearchRuntime, ExperimentState } from "../types/index.js";
+import { InitParams } from "./schemas.js";
+import { resolveWorkDir, validateWorkDir, readMaxExperiments } from "../git/index.js";
+import { cloneExperimentState, resetForReinit } from "../state/index.js";
+
+interface InitToolContext {
+  pi: ExtensionAPI;
+  getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime;
+  updateWidget: (ctx: ExtensionContext) => void;
+}
+
+export function registerInitExperiment(
+  pi: ExtensionAPI,
+  ctx: InitToolContext
+) {
+  pi.registerTool({
+    name: "init_experiment",
+    label: "Init Experiment",
+    description:
+      "Initialize the experiment session. Call once before the first run_experiment to set the name, primary metric, unit, and direction. Writes the config header to autoresearch.jsonl.",
+    promptSnippet:
+      "Initialize experiment session (name, metric, unit, direction). Call once before first run.",
+    promptGuidelines: [
+      "Call init_experiment exactly once at the start of an autoresearch session, before the first run_experiment.",
+      "If autoresearch.jsonl already exists with a config, do NOT call init_experiment again.",
+      "If the optimization target changes (different benchmark, metric, or workload), call init_experiment again to insert a new config header and reset the baseline.",
+    ],
+    parameters: InitParams,
+
+    async execute(_toolCallId, params, _signal, _onUpdate, extCtx) {
+      const runtime = ctx.getRuntime(extCtx);
+      const state = runtime.state;
+
+      // Validate working directory exists
+      const workDirError = validateWorkDir(extCtx.cwd, runtime);
+      if (workDirError) {
+        return {
+          content: [{ type: "text", text: `❌ ${workDirError}` }],
+          details: {},
+        };
+      }
+
+      const isReinit = state.results.length > 0;
+
+      state.name = params.name;
+      state.metricName = params.metric_name;
+      state.metricUnit = params.metric_unit ?? "";
+      if (params.direction === "lower" || params.direction === "higher") {
+        state.bestDirection = params.direction;
+      }
+
+      // Start a new segment
+      if (isReinit) {
+        resetForReinit(state, true);
+      }
+
+      // Read max experiments from config file
+      state.maxExperiments = readMaxExperiments(extCtx.cwd);
+
+      // Write config header to jsonl
+      const workDir = resolveWorkDir(extCtx.cwd, runtime);
+      try {
+        const jsonlPath = path.join(workDir, "autoresearch.jsonl");
+        const config = JSON.stringify({
+          type: "config",
+          name: state.name,
+          metricName: state.metricName,
+          metricUnit: state.metricUnit,
+          bestDirection: state.bestDirection,
+        });
+        if (isReinit) {
+          fs.appendFileSync(jsonlPath, config + "\n");
+        } else {
+          fs.writeFileSync(jsonlPath, config + "\n");
+        }
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `⚠️ Failed to write autoresearch.jsonl: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+          details: {},
+        };
+      }
+
+      runtime.autoresearchMode = true;
+      ctx.updateWidget(extCtx);
+
+      const reinitNote = isReinit
+        ? " (re-initialized — previous results archived, new baseline needed)"
+        : "";
+      const limitNote =
+        state.maxExperiments !== null
+          ? `\nMax iterations: ${state.maxExperiments} (from autoresearch.config.json)`
+          : "";
+      const workDirNote = workDir !== extCtx.cwd ? `\nWorking directory: ${workDir}` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
+          },
+        ],
+        details: { state: cloneExperimentState(state) },
+      };
+    },
+
+    renderCall(args, theme) {
+      let text = theme.fg("toolTitle", theme.bold("init_experiment "));
+      text += theme.fg("accent", args.name ?? "");
+      return new Text(text, 0, 0);
+    },
+
+    renderResult(result, _options, theme) {
+      const t = result.content[0];
+      return new Text(t?.type === "text" ? t.text : "", 0, 0);
+    },
+  });
+}
