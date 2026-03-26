@@ -167,7 +167,7 @@ export function registerRunExperiment(
 
         // Temp file for full output when it overflows
         let tempFilePath: string | undefined;
-        let tempFileStream: ReturnType<typeof typeof import("node:fs").createWriteStream> | undefined;
+        let tempFileStream: ReturnType<typeof import("node:fs").createWriteStream> | undefined;
         let totalBytes = 0;
 
         // Cache for Buffer.concat
