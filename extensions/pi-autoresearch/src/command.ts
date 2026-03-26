@@ -64,25 +64,15 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
       }
 
       if (command === "off") {
-        // Stop file watcher
-        if (runtime.jsonlWatcher) {
-          runtime.jsonlWatcher.close();
-          runtime.jsonlWatcher = null;
-        }
-        
-        // Remove worktree if one exists
-        if (runtime.worktreeDir) {
-          await removeAutoresearchWorktree(pi, extCtx.cwd, runtime.worktreeDir);
-          runtime.worktreeDir = null;
-        }
-
+        // Keep the worktree and file watcher for resuming later
+        // Just turn off autoresearch mode to pause the loop
         runtime.autoresearchMode = false;
         runtime.lastAutoResumeTime = 0;
         runtime.autoResumeTurns = 0;
         runtime.experimentsThisSession = 0;
         runtime.lastRunChecks = null;
         runtime.runningExperiment = null;
-        extCtx.ui.notify("Autoresearch mode OFF — worktree removed", "info");
+        extCtx.ui.notify("Autoresearch mode OFF — worktree preserved (use '/autoresearch' to resume)", "info");
         return;
       }
 

@@ -40,7 +40,7 @@ pi install https://github.com/monotykamary/pi-autoresearch
 | Subcommand | Description |
 |------------|-------------|
 | `/autoresearch <text>` | Enter autoresearch mode. If `autoresearch.md` exists, resumes the loop with `<text>` as context. Otherwise, sets up a new session. |
-| `/autoresearch off` | Leave autoresearch mode. Stops auto-resume and clears runtime state but keeps `autoresearch.jsonl` intact. |
+| `/autoresearch off` | Pause autoresearch mode. Keeps the worktree and `autoresearch.jsonl` intact for resuming later. Use `/autoresearch` to resume. |
 | `/autoresearch clear` | Delete `autoresearch.jsonl`, reset all state, and turn autoresearch mode off. Use this for a clean start. |
 
 **Examples:**
