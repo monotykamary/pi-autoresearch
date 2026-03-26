@@ -297,12 +297,41 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
     const workDir = resolveWorkDir(ctx.cwd, runtime);
 
-    // Primary: read from autoresearch.jsonl
-    const jsonlPath = path.join(workDir, "autoresearch.jsonl");
+    // Find autoresearch.jsonl: since we use isolated worktrees exclusively,
+    // scan for worktree subdirectories first, then fall back to main workDir
+    let jsonlPath: string | null = null;
     let loadedFromJsonl = false;
 
+    // Primary: scan for worktree subdirectories (exclusive worktree mode)
+    const autoresearchDir = path.join(ctx.cwd, "autoresearch");
+    if (fs.existsSync(autoresearchDir)) {
+      const entries = fs.readdirSync(autoresearchDir, { withFileTypes: true });
+      const candidates = entries
+        .filter((e) => e.isDirectory())
+        .map((e) => path.join(autoresearchDir, e.name, "autoresearch.jsonl"))
+        .filter((p) => fs.existsSync(p));
+      
+      if (candidates.length > 0) {
+        // Use most recently modified
+        candidates.sort((a, b) => {
+          const statA = fs.statSync(a);
+          const statB = fs.statSync(b);
+          return statB.mtimeMs - statA.mtimeMs;
+        });
+        jsonlPath = candidates[0];
+      }
+    }
+
+    // Fallback: legacy location (main workDir, for backwards compatibility)
+    if (!jsonlPath) {
+      const legacyPath = path.join(workDir, "autoresearch.jsonl");
+      if (fs.existsSync(legacyPath)) {
+        jsonlPath = legacyPath;
+      }
+    }
+
     try {
-      if (fs.existsSync(jsonlPath)) {
+      if (jsonlPath && fs.existsSync(jsonlPath)) {
         let segment = 0;
         const lines = fs
           .readFileSync(jsonlPath, "utf-8")
