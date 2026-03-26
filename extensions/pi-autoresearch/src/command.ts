@@ -5,17 +5,17 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { AutoresearchRuntime } from "../types/index.js";
+import type { AutoresearchRuntime } from "./types/index.js";
 import {
   resolveWorkDir,
   getDisplayWorktreePath,
   createAutoresearchWorktree,
   removeAutoresearchWorktree,
-} from "../git/index.js";
+} from "./git/index.js";
 import {
   createExperimentState,
-} from "../state/index.js";
-import { BENCHMARK_GUARDRAIL } from "../constants.js";
+} from "./state/index.js";
+import { BENCHMARK_GUARDRAIL } from "./constants.js";
 
 /** Dependencies needed by command handler */
 export interface CommandContext {
