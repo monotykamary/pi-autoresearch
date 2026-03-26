@@ -335,7 +335,8 @@ export function renderDashboardLines(
       // Flow-wrap parts into lines with "Metrics:" label on first line
       if (secParts.length > 0) {
         const metricsLabel = th.fg("muted", "Metrics:");
-        const prefix = `  ${metricsLabel}   ~ `;
+        const tilde = th.fg("muted", "~");
+        const prefix = `  ${metricsLabel}  ${tilde} `;
         const prefixWidth = visibleWidth(prefix);
         const maxLineW = width - prefixWidth;
         
