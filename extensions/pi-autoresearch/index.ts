@@ -334,101 +334,26 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
     let state = runtime.state;
 
-    const workDir = resolveWorkDir(ctx.cwd, runtime);
-
-    // Find autoresearch.jsonl: since we use isolated worktrees exclusively,
-    // scan for worktree subdirectories first, then fall back to main workDir
-    let jsonlPath: string | null = null;
-    let loadedFromJsonl = false;
-
-    // Primary: scan for worktree subdirectories (exclusive worktree mode)
-    const autoresearchDir = path.join(ctx.cwd, "autoresearch");
-    if (fs.existsSync(autoresearchDir)) {
-      const entries = fs.readdirSync(autoresearchDir, { withFileTypes: true });
-      const candidates = entries
-        .filter((e) => e.isDirectory())
-        .map((e) => path.join(autoresearchDir, e.name, "autoresearch.jsonl"))
-        .filter((p) => fs.existsSync(p));
-      
-      if (candidates.length > 0) {
-        // Use most recently modified
-        candidates.sort((a, b) => {
-          const statA = fs.statSync(a);
-          const statB = fs.statSync(b);
-          return statB.mtimeMs - statA.mtimeMs;
-        });
-        jsonlPath = candidates[0];
-      }
-    }
-
-    // Fallback: legacy location (main workDir, for backwards compatibility)
-    if (!jsonlPath) {
-      const legacyPath = path.join(workDir, "autoresearch.jsonl");
-      if (fs.existsSync(legacyPath)) {
-        jsonlPath = legacyPath;
-      }
-    }
-
-    try {
-      if (jsonlPath && fs.existsSync(jsonlPath)) {
-        let segment = 0;
-        const lines = fs
-          .readFileSync(jsonlPath, "utf-8")
-          .trim()
-          .split("\n")
-          .filter(Boolean);
-        for (const line of lines) {
-          try {
-            const entry = JSON.parse(line);
-
-            // Config header line
-            if (entry.type === "config") {
-              if (entry.name) state.name = entry.name;
-              if (entry.metricName) state.metricName = entry.metricName;
-              if (entry.metricUnit !== undefined) state.metricUnit = entry.metricUnit;
-              if (entry.bestDirection) state.bestDirection = entry.bestDirection;
-              if (entry.targetValue !== undefined) state.targetValue = entry.targetValue ?? null;
-              if (state.results.length > 0) {
-                segment++;
-                state.secondaryMetrics = [];
-              }
-              state.currentSegment = segment;
-              continue;
-            }
-
-            // Experiment result line
-            const experiment: ExperimentResult = {
-              commit: entry.commit ?? "",
-              metric: entry.metric ?? 0,
-              metrics: entry.metrics ?? {},
-              status: entry.status ?? "keep",
-              description: entry.description ?? "",
-              timestamp: entry.timestamp ?? 0,
-              segment,
-              confidence: entry.confidence ?? null,
-              asi: entry.asi ?? undefined,
-            };
-            state.results.push(experiment);
-
-            // Register secondary metrics
-            for (const name of Object.keys(entry.metrics ?? {})) {
-              if (!state.secondaryMetrics.find((m) => m.name === name)) {
-                let unit = "";
-                if (name.endsWith("µs")) unit = "µs";
-                else if (name.endsWith("_ms")) unit = "ms";
-                else if (name.endsWith("_s") || name.endsWith("_sec")) unit = "s";
-                else if (name.endsWith("_kb")) unit = "kb";
-                else if (name.endsWith("_mb")) unit = "mb";
-                state.secondaryMetrics.push({ name, unit });
-              }
-            }
-          } catch {
-            // Skip malformed lines
-          }
+    // Only reconstruct from session history (THIS session only)
+    // Session isolation: we never load from files on startup
+    for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type !== "message") continue;
+      const msg = entry.message;
+      if (msg.role !== "toolResult" || msg.toolName !== "log_experiment")
+        continue;
+      const details = msg.details as LogDetails | undefined;
+      if (details?.state) {
+        runtime.state = cloneExperimentState(details.state);
+        state = runtime.state;
+        if (!state.secondaryMetrics) state.secondaryMetrics = [];
+        if (state.metricUnit === "s" && state.metricName === "metric") {
+          state.metricUnit = "";
         }
-        if (state.results.length > 0) {
-          loadedFromJsonl = true;
-          state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
+        for (const r of state.results) {
+          if (!r.metrics) r.metrics = {};
+          if (r.confidence === undefined) r.confidence = null;
+        }
+        if (state.confidence === undefined) {
           state.confidence = computeConfidence(
             state.results,
             state.currentSegment,
@@ -436,55 +361,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           );
         }
       }
-    } catch {
-      // Fall through to session history
     }
-
-    // Restore worktreeDir: prioritize the preserved one (from /autoresearch command)
-    // over the one detected from JSONL (which might be stale from a previous session)
-    if (preservedWorktreeDir && fs.existsSync(preservedWorktreeDir)) {
-      // Use the preserved worktree (newly created by /autoresearch command)
-      runtime.worktreeDir = preservedWorktreeDir;
-    } else if (loadedFromJsonl && jsonlPath.includes("/autoresearch/")) {
-      // Fallback: detect worktree from JSONL path (for session restore)
-      const detectedWorktreeDir = path.dirname(jsonlPath);
-      if (fs.existsSync(detectedWorktreeDir)) {
-        runtime.worktreeDir = detectedWorktreeDir;
-      }
-    }
-
-    // Fallback: reconstruct from session history
-    if (!loadedFromJsonl) {
-      for (const entry of ctx.sessionManager.getBranch()) {
-        if (entry.type !== "message") continue;
-        const msg = entry.message;
-        if (msg.role !== "toolResult" || msg.toolName !== "log_experiment")
-          continue;
-        const details = msg.details as LogDetails | undefined;
-        if (details?.state) {
-          runtime.state = cloneExperimentState(details.state);
-          state = runtime.state;
-          if (!state.secondaryMetrics) state.secondaryMetrics = [];
-          if (state.metricUnit === "s" && state.metricName === "metric") {
-            state.metricUnit = "";
-          }
-          for (const r of state.results) {
-            if (!r.metrics) r.metrics = {};
-            if (r.confidence === undefined) r.confidence = null;
-          }
-          if (state.confidence === undefined) {
-            state.confidence = computeConfidence(
-              state.results,
-              state.currentSegment,
-              state.bestDirection
-            );
-          }
-        }
-      }
-    }
-
-    // Auto-enter autoresearch mode only when a persisted experiment log exists
-    runtime.autoresearchMode = fs.existsSync(path.join(workDir, "autoresearch.jsonl"));
 
     updateWidget(ctx);
   };

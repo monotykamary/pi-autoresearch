@@ -1753,57 +1753,38 @@ describe("Session lifecycle cleanup", () => {
       expect(clearedRuntime.state.results.length).toBe(0);
       expect(clearedRuntime.autoresearchMode).toBe(false);
     });
-
-    it("preserves worktree directory during session_switch for worktree isolation", () => {
-      // This test documents that reconstructState preserves worktreeDir
-      // when it was set by /autoresearch command, but the session_before_switch
-      // handler ensures UI is cleared before reconstructState runs
-      const runtime = createWidgetTestRuntime();
-      
-      // Simulate: worktree created by /autoresearch command
-      const worktreeDir = "/project/autoresearch/session-123";
-      
-      // After init_experiment in worktree
-      runtime.state.name = "Optimize performance";
-      runtime.autoresearchMode = true;
-      
-      // User runs /new - session_before_switch clears UI
-      const clearedRuntime = createWidgetTestRuntime();
-      expect(getWidgetState(clearedRuntime).type).toBe("hidden");
-      
-      // Then session_switch fires with reason="new", reconstructState would run
-      // but since we cleared the runtime store, it starts fresh
-      // The worktreeDir would be null in the new runtime (not preserved across /new)
-    });
   });
 
-  describe("Session switch vs new session", () => {
-    it("session_switch preserves state for resume but not for new", () => {
-      // Documents the difference between:
-      // - reason="new" (/new command): clear everything
-      // - reason="resume" (/resume command): reconstruct from files
+  describe("Session isolation - never load from files", () => {
+    it("session_start never loads widget from files (session isolation)", () => {
+      // Session isolation principle: widget only shows if there's activity
+      // in THIS session. Files from other sessions are ignored.
       
       const runtime = createWidgetTestRuntime();
+      
+      // Simulate fresh session - no prior activity
+      // Even if autoresearch.jsonl exists in worktree, it won't be loaded
+      // because reconstructState only uses session history
+      
+      expect(getWidgetState(runtime).type).toBe("hidden");
+      expect(runtime.state.results.length).toBe(0);
+    });
+
+    it("autoresearchMode only set by explicit /autoresearch command", () => {
+      // autoresearchMode should NOT be auto-set based on file existence
+      // User must explicitly run /autoresearch to enable mode
+      
+      const runtime = createWidgetTestRuntime();
+      
+      // Default: mode is off
+      expect(runtime.autoresearchMode).toBe(false);
+      
+      // User runs /autoresearch - mode is enabled
+      runtime.autoresearchMode = true;
       runtime.state.name = "Test Session";
-      runtime.state.results = [{
-        commit: "abc1234",
-        metric: 100,
-        metrics: {},
-        status: "keep",
-        description: "Run 1",
-        timestamp: Date.now(),
-        segment: 0,
-        confidence: null,
-      }];
       
-      // For "new": session_before_switch clears state before switch
-      // Result: hidden widget
-      const afterNew = createWidgetTestRuntime();
-      expect(getWidgetState(afterNew).type).toBe("hidden");
-      
-      // For "resume": reconstructState preserves state from files
-      // Result: dashboard still visible (if autoresearch.jsonl exists)
-      expect(getWidgetState(runtime).type).toBe("dashboard");
+      expect(runtime.autoresearchMode).toBe(true);
+      expect(getWidgetState(runtime).type).toBe("ready");
     });
   });
 });
