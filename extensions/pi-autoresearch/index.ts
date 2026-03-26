@@ -103,13 +103,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     const runtime = getRuntime(ctx);
     const state = runtime.state;
 
-    // Hide widget if no experiment activity at all
-    if (state.results.length === 0 && !runtime.runningExperiment && !runtime.experimentCompletedWaitingForLog) {
-      ctx.ui.setWidget("autoresearch", undefined);
-      return;
-    }
-
-    // Show "running" state when experiment is in progress
+    // State 1: During run_experiment — actively running
     if (runtime.runningExperiment) {
       ctx.ui.setWidget("autoresearch", (_tui, theme) => {
         const parts = [
@@ -122,20 +116,19 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         }
 
         parts.push(theme.fg("dim", ` │ ${runtime.runningExperiment!.command}`));
-        parts.push(theme.fg("dim", "  (waiting for first logged result)"));
 
         return new Text(parts.join(""), 0, 0);
       });
       return;
     }
 
-    // Show "completed, waiting for log" state when run_experiment finished but log_experiment not called
-    if (runtime.experimentCompletedWaitingForLog && state.results.length === 0) {
+    // State 2: After run_experiment, before log_experiment — finished, needs logging
+    if (runtime.experimentCompletedWaitingForLog) {
       ctx.ui.setWidget("autoresearch", (_tui, theme) => {
         const parts = [
           theme.fg("accent", "🔬"),
-          theme.fg("success", " ✅ completed"),
-          theme.fg("dim", "  (call log_experiment to record result)"),
+          theme.fg("text", " done"),
+          theme.fg("dim", " — call log_experiment"),
         ];
 
         if (state.name) {
@@ -144,6 +137,26 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
         return new Text(parts.join(""), 0, 0);
       });
+      return;
+    }
+
+    // State 3: After init_experiment, before any run_experiment — session ready
+    if (state.name && state.results.length === 0) {
+      ctx.ui.setWidget("autoresearch", (_tui, theme) => {
+        const parts = [
+          theme.fg("accent", "🔬"),
+          theme.fg("text", ` ${state.name}`),
+          theme.fg("dim", " — ready"),
+        ];
+
+        return new Text(parts.join(""), 0, 0);
+      });
+      return;
+    }
+
+    // Hide widget if no session initialized and no activity
+    if (state.results.length === 0) {
+      ctx.ui.setWidget("autoresearch", undefined);
       return;
     }
 
