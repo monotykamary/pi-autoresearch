@@ -75,7 +75,6 @@ export interface RunDetails {
 
 export interface LogDetails {
   experiment: ExperimentResult;
-  state: ExperimentState;
   wallClockSeconds: number | null;
 }
 
@@ -97,6 +96,8 @@ export interface AutoresearchRuntime {
   worktreeDir: string | null;
   /** Git commit hash captured at run_experiment entry (before AI modifications). Used by log_experiment for the experiment record. */
   startingCommit: string | null;
+  /** File watcher for autoresearch.jsonl to enable real-time UI updates */
+  jsonlWatcher: { close(): void } | null;
 }
 
 export interface AutoresearchConfig {

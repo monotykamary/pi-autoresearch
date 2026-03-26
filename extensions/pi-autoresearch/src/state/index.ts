@@ -27,18 +27,6 @@ export function createExperimentState(): ExperimentState {
   };
 }
 
-/** Deep clone an experiment state */
-export function cloneExperimentState(state: ExperimentState): ExperimentState {
-  return {
-    ...state,
-    results: state.results.map((result) => ({
-      ...result,
-      metrics: { ...result.metrics },
-    })),
-    secondaryMetrics: state.secondaryMetrics.map((metric) => ({ ...metric })),
-  };
-}
-
 /** Create a fresh session runtime */
 export function createSessionRuntime(): AutoresearchRuntime {
   return {
@@ -55,6 +43,7 @@ export function createSessionRuntime(): AutoresearchRuntime {
     state: createExperimentState(),
     worktreeDir: null,
     startingCommit: null,
+    jsonlWatcher: null,
   };
 }
 

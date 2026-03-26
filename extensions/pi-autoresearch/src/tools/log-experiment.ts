@@ -20,7 +20,6 @@ import {
   getProtectedFiles,
 } from "../git/index.js";
 import {
-  cloneExperimentState,
   registerSecondaryMetrics,
   updateStateAfterLog,
 } from "../state/index.js";
@@ -28,8 +27,6 @@ import {
 interface LogToolContext {
   pi: ExtensionAPI;
   getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime;
-  updateWidget: (ctx: ExtensionContext) => void;
-  overlayTui: { requestRender: () => void } | null;
 }
 
 export function registerLogExperiment(
@@ -366,14 +363,10 @@ export function registerLogExperiment(
         runtime.autoresearchMode = false;
       }
 
-      ctx.updateWidget(extCtx);
-      if (ctx.overlayTui) ctx.overlayTui.requestRender();
-
       return {
         content: [{ type: "text", text }],
         details: {
           experiment: { ...experiment, metrics: { ...experiment.metrics } },
-          state: cloneExperimentState(state),
           wallClockSeconds,
         } as LogDetails,
       };

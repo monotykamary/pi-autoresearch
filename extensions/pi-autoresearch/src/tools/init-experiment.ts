@@ -6,16 +6,16 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { Text } from "@mariozechner/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { AutoresearchRuntime, ExperimentState } from "../types/index.js";
+import type { AutoresearchRuntime } from "../types/index.js";
 import { InitParams } from "./schemas.js";
 import { resolveWorkDir, validateWorkDir, readMaxExperiments, createAutoresearchWorktree, getDisplayWorktreePath } from "../git/index.js";
-import { cloneExperimentState, resetForReinit } from "../state/index.js";
+import { resetForReinit } from "../state/index.js";
 
 interface InitToolContext {
   pi: ExtensionAPI;
   getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime;
-  updateWidget: (ctx: ExtensionContext) => void;
   getSessionKey: (ctx: ExtensionContext) => string;
+  startWatcher?: (ctx: ExtensionContext) => void;
 }
 
 export function registerInitExperiment(
@@ -116,7 +116,13 @@ export function registerInitExperiment(
       }
 
       runtime.autoresearchMode = true;
-      ctx.updateWidget(extCtx);
+
+      // Start watcher if not already running and we have a worktree
+      if (ctx.startWatcher && runtime.worktreeDir && !runtime.jsonlWatcher) {
+        ctx.startWatcher(extCtx);
+      }
+
+      // File watcher will update UI when JSONL changes
 
       const reinitNote = isReinit
         ? " (re-initialized — previous results archived, new baseline needed)"
@@ -140,7 +146,7 @@ export function registerInitExperiment(
             text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${targetNote}${worktreeNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
           },
         ],
-        details: { state: cloneExperimentState(state) },
+        details: {},
       };
     },
 

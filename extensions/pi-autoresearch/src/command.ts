@@ -11,6 +11,7 @@ import {
   getDisplayWorktreePath,
   createAutoresearchWorktree,
   removeAutoresearchWorktree,
+  detectAutoresearchWorktree,
 } from "./git/index.js";
 import {
   createExperimentState,
@@ -23,6 +24,8 @@ export interface CommandContext {
   getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime;
   getSessionKey: (ctx: ExtensionContext) => string;
   updateWidget: (ctx: ExtensionContext) => void;
+  reconstructState?: (ctx: ExtensionContext) => Promise<void>;
+  startWatcher?: (ctx: ExtensionContext) => void;
 }
 
 /**
@@ -61,6 +64,12 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
       }
 
       if (command === "off") {
+        // Stop file watcher
+        if (runtime.jsonlWatcher) {
+          runtime.jsonlWatcher.close();
+          runtime.jsonlWatcher = null;
+        }
+        
         // Remove worktree if one exists
         if (runtime.worktreeDir) {
           await removeAutoresearchWorktree(pi, extCtx.cwd, runtime.worktreeDir);
@@ -78,6 +87,12 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
       }
 
       if (command === "clear") {
+        // Stop file watcher
+        if (runtime.jsonlWatcher) {
+          runtime.jsonlWatcher.close();
+          runtime.jsonlWatcher = null;
+        }
+        
         const workDir = resolveWorkDir(extCtx.cwd, runtime);
         const jsonlPath = path.join(workDir, "autoresearch.jsonl");
 
@@ -122,6 +137,24 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
       runtime.autoresearchMode = true;
       runtime.autoResumeTurns = 0;
 
+      // Try to detect existing worktree first
+      if (!runtime.worktreeDir) {
+        const detectedWorktree = detectAutoresearchWorktree(extCtx.cwd);
+        if (detectedWorktree) {
+          runtime.worktreeDir = detectedWorktree;
+          const displayPath = getDisplayWorktreePath(extCtx.cwd, detectedWorktree);
+          extCtx.ui.notify(`Found existing autoresearch worktree: ${displayPath}`, "info");
+
+          // Reconstruct state from JSONL now that worktree is known
+          if (ctx.reconstructState) {
+            await ctx.reconstructState(extCtx);
+          }
+          if (ctx.startWatcher) {
+            ctx.startWatcher(extCtx);
+          }
+        }
+      }
+
       // Create worktree for isolation if not already exists
       if (!runtime.worktreeDir) {
         const worktreePath = await createAutoresearchWorktree(
@@ -133,6 +166,14 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
           runtime.worktreeDir = worktreePath;
           const displayPath = getDisplayWorktreePath(extCtx.cwd, worktreePath);
           extCtx.ui.notify(`Created autoresearch worktree: ${displayPath}`, "info");
+
+          // Reconstruct state from JSONL now that worktree is known
+          if (ctx.reconstructState) {
+            await ctx.reconstructState(extCtx);
+          }
+          if (ctx.startWatcher) {
+            ctx.startWatcher(extCtx);
+          }
         } else {
           extCtx.ui.notify(
             "Failed to create autoresearch worktree — isolation required",

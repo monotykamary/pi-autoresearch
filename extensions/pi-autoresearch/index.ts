@@ -56,7 +56,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   const updateWidget = createWidgetUpdater({ getRuntime });
 
   // Register lifecycle handlers (session events, agent start/end)
-  registerLifecycleHandlers({
+  const { reconstructState, startWatcher } = registerLifecycleHandlers({
     pi,
     getRuntime,
     getSessionKey,
@@ -72,19 +72,14 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
   // Register tools
   registerRedirectedFileTools(pi, getRuntime);
-  registerInitExperiment(pi, { pi, getRuntime, updateWidget, getSessionKey });
+  registerInitExperiment(pi, { pi, getRuntime, getSessionKey, startWatcher: (extCtx) => startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget) });
   registerRunExperiment(pi, {
     pi,
     getRuntime,
     updateWidget,
     overlayTui: uiState.overlayTui,
   });
-  registerLogExperiment(pi, {
-    pi,
-    getRuntime,
-    updateWidget,
-    overlayTui: uiState.overlayTui,
-  });
+  registerLogExperiment(pi, { pi, getRuntime });
 
   // Register keyboard shortcuts
   pi.registerShortcut("ctrl+x", {
@@ -128,5 +123,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     getRuntime,
     getSessionKey,
     updateWidget,
+    reconstructState,
+    startWatcher,
   });
 }

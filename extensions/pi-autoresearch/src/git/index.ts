@@ -5,6 +5,7 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
+import { execSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutoresearchRuntime, AutoresearchConfig } from "../types/index.js";
 
@@ -12,7 +13,6 @@ import type { AutoresearchRuntime, AutoresearchConfig } from "../types/index.js"
 function getGlobalGitignorePath(): string | null {
   try {
     // Check if core.excludesfile is set
-    const { execSync } = require("node:child_process");
     const result = execSync("git config --global core.excludesfile", {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "ignore"],
@@ -116,6 +116,34 @@ export function resolveWorkDir(
   return path.isAbsolute(config.workingDir)
     ? config.workingDir
     : path.resolve(ctxCwd, config.workingDir);
+}
+
+/** Detect autoresearch worktree by looking for autoresearch.jsonl in git worktrees */
+export function detectAutoresearchWorktree(ctxCwd: string): string | null {
+  try {
+    // List all worktrees
+    const output = execSync("git worktree list --porcelain", {
+      cwd: ctxCwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+
+    const lines = output.trim().split("\n");
+    for (const line of lines) {
+      // Porcelain format: "worktree <path>"
+      if (line.startsWith("worktree ")) {
+        const worktreePath = line.slice(9).trim();
+        // Check if this worktree has autoresearch.jsonl
+        const jsonlPath = path.join(worktreePath, "autoresearch.jsonl");
+        if (fs.existsSync(jsonlPath)) {
+          return worktreePath;
+        }
+      }
+    }
+  } catch {
+    // Git command failed or no worktrees
+  }
+  return null;
 }
 
 /** Validate that the resolved working directory exists */

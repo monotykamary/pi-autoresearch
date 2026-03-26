@@ -185,9 +185,11 @@ The **extension** is domain-agnostic infrastructure. The **skill** encodes domai
 Two files keep the session alive across restarts and context resets. They live inside the isolated worktree at `autoresearch/<session-id>/`:
 
 ```
-autoresearch.jsonl   — append-only log of every run (metric, status, commit, description)
+autoresearch.jsonl   — source of truth: append-only log of every run (metric, status, commit, description)
 autoresearch.md      — living document: objective, what's been tried, dead ends, key wins
 ```
+
+**JSONL as source of truth:** The UI reconstructs state exclusively from `autoresearch.jsonl`. The file is watched for changes, so manual edits update the dashboard in real-time. The UI also updates automatically when `log_experiment` writes to the file.
 
 **Worktree isolation:** Each autoresearch session creates a git worktree inside `autoresearch/<session-id>/`. This keeps your main working directory clean while experiments accumulate side commits. When done, merge back the successful changes or `/autoresearch clear` to discard everything.
 
