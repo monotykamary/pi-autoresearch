@@ -296,6 +296,7 @@ This fork (`monotykamary/pi-autoresearch`) adds the following on top of [upstrea
 | Feature | Description |
 |---------|-------------|
 | **Git worktree isolation** | Each session creates an isolated worktree at `autoresearch/<session-id>/` — keeps main repo clean, experiments run in isolation |
+| **Auto global gitignore** | Automatically adds `autoresearch/` to your global gitignore when creating worktrees — respects `core.excludesfile` config |
 | **Test suite + CI** | Vitest tests (unit + integration), GitHub Actions workflow |
 | **target_value** | Optional threshold to auto-stop when metric reaches goal |
 | **Bordered fullscreen overlay** | `Ctrl+Shift+X` opens a scrollable full-terminal dashboard with borders |

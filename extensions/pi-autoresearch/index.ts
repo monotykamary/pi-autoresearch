@@ -268,7 +268,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         // Show worktree indicator
         if (runtime.worktreeDir) {
           const displayPath = getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir);
-          parts.push(theme.fg("dim", ` │ 📁${displayPath}`));
+          parts.push(theme.fg("dim", ` │ 📁 ${displayPath}`));
         }
 
         if (state.name) {
