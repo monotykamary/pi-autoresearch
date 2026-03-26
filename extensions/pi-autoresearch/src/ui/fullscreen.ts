@@ -2,7 +2,7 @@
  * Fullscreen dashboard overlay TUI
  */
 
-import { matchesKey, visibleWidth } from "@mariozechner/pi-tui";
+import { matchesKey, visibleWidth, truncateToWidth } from "@mariozechner/pi-tui";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AutoresearchRuntime } from "../types/index.js";
 import { renderDashboardLines } from "../dashboard/index.js";
@@ -91,7 +91,7 @@ export function createFullscreenHandler(
             const border = (s: string) => theme.fg("dim", s);
             const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
             const row = (content: string) => {
-              const safe = content.slice(0, sectionW);
+              const safe = truncateToWidth(content, sectionW);
               return border("│") + pad(" " + safe, innerW) + border("│");
             };
             const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
