@@ -7,22 +7,16 @@ description: Set up and run an autonomous experiment loop for any optimization t
 
 Autonomous experiment loop: try ideas, keep what works, discard what doesn't, never stop.
 
-## When to Use (Scope)
+## When to Use
 
-**Use autoresearch ONLY for:**
-- Long-horizon optimization tasks with **verifiable metrics** (performance, accuracy, bundle size, latency, throughput, etc.)
-- Tasks where you can measure improvement quantitatively
-- Optimization loops that may run 10+ iterations automatically
+Autoresearch is designed for **systematic experimentation** — it adds overhead (worktree setup, git commits, benchmark time, context consumption) that pays off when:
 
-**Do NOT use autoresearch for:**
-- General development or feature implementation without a metric
-- One-off commits or quick fixes
-- Exploratory coding without a measurable target
-- Tasks where success is subjective or binary (works/doesn't work)
-- Refactoring without performance goals
-- Bug fixes (unless optimizing a reproduction benchmark)
+- You're running **10+ iterations** exploring variants
+- Each iteration involves **expensive operations** (ML training, large builds, integration tests)
+- The metric is **noisy** and needs statistical confidence
+- You have a **verifiable target** (latency, throughput, accuracy, bundle size, etc.)
 
-If there's no clear metric to optimize, use regular `bash` and `edit` tools instead.
+For quick wins — one-shot fixes, lint/type feedback under 1s, or trivial changes — regular `bash` and `edit` are faster. Use this skill when the autonomous loop justifies the setup cost.
 
 ## Tools
 
