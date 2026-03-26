@@ -317,7 +317,6 @@ export function registerRunExperiment(
         });
       }).finally(() => {
         runtime.runningExperiment = null;
-        runtime.experimentCompletedWaitingForLog = true;
         ctx.updateWidget(extCtx);
         if (ctx.overlayTui) ctx.overlayTui.requestRender();
       });
@@ -360,6 +359,13 @@ export function registerRunExperiment(
           : null;
 
       const passed = benchmarkPassed && (checksPass === null || checksPass);
+
+      // Only show "done" state for successful runs (crashes should not show "done")
+      if (passed) {
+        runtime.experimentCompletedWaitingForLog = true;
+        ctx.updateWidget(extCtx);
+        if (ctx.overlayTui) ctx.overlayTui.requestRender();
+      }
 
       // Reuse streaming temp file if it exists, otherwise create one for large output
       let fullOutputPath: string | undefined = streamTempFile;
