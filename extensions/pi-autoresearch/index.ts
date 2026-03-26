@@ -131,7 +131,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           succeeded 
             ? theme.fg("text", " done") 
             : theme.fg("error", " failed"),
-          theme.fg("dim", " — call log_experiment"),
+          theme.fg("dim", succeeded ? " — call log_experiment" : " — rerunning experiment"),
         ];
 
         if (state.name) {

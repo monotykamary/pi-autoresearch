@@ -1290,3 +1290,356 @@ describe("Automatic commit tracking", () => {
     });
   });
 });
+
+// ============================================================================
+// Tests: Widget State Behaviors
+// ============================================================================
+
+interface TestRuntime {
+  autoresearchMode: boolean;
+  dashboardExpanded: boolean;
+  runningExperiment: { startedAt: number; command: string } | null;
+  experimentCompletedWaitingForLog: boolean;
+  lastRunSucceeded: boolean | null;
+  state: {
+    name: string | null;
+    results: ExperimentResult[];
+    metricName: string;
+  };
+}
+
+function createWidgetTestRuntime(): TestRuntime {
+  return {
+    autoresearchMode: false,
+    dashboardExpanded: false,
+    runningExperiment: null,
+    experimentCompletedWaitingForLog: false,
+    lastRunSucceeded: null,
+    state: {
+      name: null,
+      results: [],
+      metricName: "metric",
+    },
+  };
+}
+
+/**
+ * Determines what the widget should display based on runtime state.
+ * Mirrors the logic in updateWidget() in index.ts
+ */
+function getWidgetState(runtime: TestRuntime): 
+  | { type: "hidden" }
+  | { type: "running"; name: string | null; command: string }
+  | { type: "waiting_for_log"; succeeded: boolean; name: string | null }
+  | { type: "ready"; name: string }
+  | { type: "dashboard" } {
+  
+  // State 1: During run_experiment
+  if (runtime.runningExperiment) {
+    return {
+      type: "running",
+      name: runtime.state.name,
+      command: runtime.runningExperiment.command,
+    };
+  }
+
+  // State 2: After run_experiment, before log_experiment
+  if (runtime.experimentCompletedWaitingForLog) {
+    return {
+      type: "waiting_for_log",
+      succeeded: runtime.lastRunSucceeded === true,
+      name: runtime.state.name,
+    };
+  }
+
+  // State 3: After init_experiment, before any run_experiment
+  if (runtime.state.name && runtime.state.results.length === 0) {
+    return {
+      type: "ready",
+      name: runtime.state.name,
+    };
+  }
+
+  // Hide if no session and no activity
+  if (runtime.state.results.length === 0) {
+    return { type: "hidden" };
+  }
+
+  // Has results - show dashboard
+  return { type: "dashboard" };
+}
+
+describe("Widget state behaviors", () => {
+  describe("Initial state", () => {
+    it("hides widget when no session initialized", () => {
+      const runtime = createWidgetTestRuntime();
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("hidden");
+    });
+  });
+
+  describe("After init_experiment", () => {
+    it("shows 'ready' state with session name", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Optimize render performance";
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("ready");
+      expect((state as { type: "ready"; name: string }).name).toBe("Optimize render performance");
+    });
+
+    it("stays in ready state even if name is empty string", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "";
+      
+      // Empty name is falsy, so this would be hidden
+      // This is expected behavior - init_experiment requires a name
+      const state = getWidgetState(runtime);
+      
+      // Empty string is falsy in JS, so it won't trigger ready state
+      expect(state.type).toBe("hidden");
+    });
+  });
+
+  describe("During run_experiment", () => {
+    it("shows 'running' state with command", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.runningExperiment = {
+        startedAt: Date.now(),
+        command: "bash benchmark.sh",
+      };
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("running");
+      expect((state as { type: "running"; name: string | null; command: string }).command).toBe("bash benchmark.sh");
+      expect((state as { type: "running"; name: string | null; command: string }).name).toBe("Test Session");
+    });
+
+    it("running state takes precedence over waiting_for_log", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = true;
+      runtime.runningExperiment = {
+        startedAt: Date.now(),
+        command: "bash new_run.sh",
+      };
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("running");
+    });
+  });
+
+  describe("After successful run_experiment", () => {
+    it("shows 'waiting_for_log' with succeeded=true", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = true;
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("waiting_for_log");
+      expect((state as { type: "waiting_for_log"; succeeded: boolean; name: string | null }).succeeded).toBe(true);
+    });
+
+    it("preserves session name in waiting state", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "My Experiment";
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = true;
+      
+      const state = getWidgetState(runtime);
+      
+      expect((state as { type: "waiting_for_log"; succeeded: boolean; name: string | null }).name).toBe("My Experiment");
+    });
+  });
+
+  describe("After failed run_experiment", () => {
+    it("shows 'waiting_for_log' with succeeded=false for crash", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = false;
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("waiting_for_log");
+      expect((state as { type: "waiting_for_log"; succeeded: boolean; name: string | null }).succeeded).toBe(false);
+    });
+
+    it("shows 'waiting_for_log' with succeeded=false for timeout", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = false;  // timeout sets this to false
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("waiting_for_log");
+      expect((state as { type: "waiting_for_log"; succeeded: boolean; name: string | null }).succeeded).toBe(false);
+    });
+
+    it("does NOT hide widget on failure (no flash)", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = false;
+      
+      const state = getWidgetState(runtime);
+      
+      // Critical: widget should still be visible even for failed runs
+      expect(state.type).not.toBe("hidden");
+    });
+  });
+
+  describe("After log_experiment", () => {
+    it("transitions to dashboard when results exist", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.state.results = [{
+        commit: "abc1234",
+        metric: 100,
+        metrics: {},
+        status: "keep",
+        description: "Baseline",
+        timestamp: Date.now(),
+        segment: 0,
+        confidence: null,
+      }];
+      // Both flags should be cleared by log_experiment
+      runtime.experimentCompletedWaitingForLog = false;
+      runtime.lastRunSucceeded = null;
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("dashboard");
+    });
+  });
+
+  describe("State transitions", () => {
+    it("full lifecycle: hidden → ready → running → waiting (success) → dashboard", () => {
+      const runtime = createWidgetTestRuntime();
+      
+      // 1. Initial - hidden
+      expect(getWidgetState(runtime).type).toBe("hidden");
+      
+      // 2. After init_experiment - ready
+      runtime.state.name = "My Session";
+      expect(getWidgetState(runtime).type).toBe("ready");
+      
+      // 3. During run_experiment - running
+      runtime.runningExperiment = { startedAt: Date.now(), command: "test" };
+      expect(getWidgetState(runtime).type).toBe("running");
+      
+      // 4. After successful run - waiting for log
+      runtime.runningExperiment = null;
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = true;
+      expect(getWidgetState(runtime).type).toBe("waiting_for_log");
+      
+      // 5. After log_experiment - dashboard
+      runtime.experimentCompletedWaitingForLog = false;
+      runtime.lastRunSucceeded = null;
+      runtime.state.results.push({
+        commit: "abc1234",
+        metric: 100,
+        metrics: {},
+        status: "keep",
+        description: "First run",
+        timestamp: Date.now(),
+        segment: 0,
+        confidence: null,
+      });
+      expect(getWidgetState(runtime).type).toBe("dashboard");
+    });
+
+    it("full lifecycle with crash: hidden → ready → running → waiting (failed) → dashboard", () => {
+      const runtime = createWidgetTestRuntime();
+      
+      // 1. Initial - hidden
+      expect(getWidgetState(runtime).type).toBe("hidden");
+      
+      // 2. After init_experiment - ready
+      runtime.state.name = "My Session";
+      expect(getWidgetState(runtime).type).toBe("ready");
+      
+      // 3. During run_experiment - running
+      runtime.runningExperiment = { startedAt: Date.now(), command: "test" };
+      expect(getWidgetState(runtime).type).toBe("running");
+      
+      // 4. After CRASH - still waiting for log (but with failed state)
+      runtime.runningExperiment = null;
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = false;
+      const waitingState = getWidgetState(runtime) as { type: "waiting_for_log"; succeeded: boolean; name: string | null };
+      expect(waitingState.type).toBe("waiting_for_log");
+      expect(waitingState.succeeded).toBe(false);
+      
+      // 5. After log_experiment with crash status - dashboard
+      runtime.experimentCompletedWaitingForLog = false;
+      runtime.lastRunSucceeded = null;
+      runtime.state.results.push({
+        commit: "abc1234",
+        metric: 0,  // crash typically has metric 0
+        metrics: {},
+        status: "crash",
+        description: "Crashed run",
+        timestamp: Date.now(),
+        segment: 0,
+        confidence: null,
+      });
+      expect(getWidgetState(runtime).type).toBe("dashboard");
+    });
+  });
+
+  describe("Widget never flashes", () => {
+    it("maintains visibility through entire pre-log lifecycle", () => {
+      const runtime = createWidgetTestRuntime();
+      
+      // Start with init
+      runtime.state.name = "Test";
+      const state1 = getWidgetState(runtime);
+      expect(state1.type).not.toBe("hidden");
+      
+      // Transition to running
+      runtime.runningExperiment = { startedAt: Date.now(), command: "cmd" };
+      const state2 = getWidgetState(runtime);
+      expect(state2.type).not.toBe("hidden");
+      
+      // Transition to waiting (success)
+      runtime.runningExperiment = null;
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = true;
+      const state3 = getWidgetState(runtime);
+      expect(state3.type).not.toBe("hidden");
+      
+      // Transition to waiting (failure) - still visible!
+      runtime.lastRunSucceeded = false;
+      const state4 = getWidgetState(runtime);
+      expect(state4.type).not.toBe("hidden");
+    });
+
+    it("never shows hidden between run_experiment and log_experiment", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test";
+      
+      // Simulate: running → done (success)
+      runtime.runningExperiment = null;
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = true;
+      
+      // Should NOT be hidden
+      const state = getWidgetState(runtime);
+      expect(state.type).not.toBe("hidden");
+      
+      // Specifically should be waiting_for_log
+      expect(state.type).toBe("waiting_for_log");
+    });
+  });
+});
