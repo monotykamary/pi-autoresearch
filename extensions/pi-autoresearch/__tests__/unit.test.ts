@@ -1334,6 +1334,11 @@ function getWidgetState(runtime: TestRuntime):
   | { type: "ready"; name: string }
   | { type: "dashboard" } {
   
+  // Once we have results, ALWAYS show dashboard (no transient states)
+  if (runtime.state.results.length > 0) {
+    return { type: "dashboard" };
+  }
+  
   // State 1: During run_experiment
   if (runtime.runningExperiment) {
     return {
@@ -1353,7 +1358,7 @@ function getWidgetState(runtime: TestRuntime):
   }
 
   // State 3: After init_experiment, before any run_experiment
-  if (runtime.state.name && runtime.state.results.length === 0) {
+  if (runtime.state.name) {
     return {
       type: "ready",
       name: runtime.state.name,
@@ -1361,12 +1366,7 @@ function getWidgetState(runtime: TestRuntime):
   }
 
   // Hide if no session and no activity
-  if (runtime.state.results.length === 0) {
-    return { type: "hidden" };
-  }
-
-  // Has results - show dashboard
-  return { type: "dashboard" };
+  return { type: "hidden" };
 }
 
 describe("Widget state behaviors", () => {
@@ -1640,6 +1640,71 @@ describe("Widget state behaviors", () => {
       
       // Specifically should be waiting_for_log
       expect(state.type).toBe("waiting_for_log");
+    });
+  });
+
+  describe("After first result: no transient states", () => {
+    it("shows dashboard instead of 'running' when results exist", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.state.results = [{
+        commit: "abc1234",
+        metric: 100,
+        metrics: {},
+        status: "keep",
+        description: "First run",
+        timestamp: Date.now(),
+        segment: 0,
+        confidence: null,
+      }];
+      runtime.runningExperiment = { startedAt: Date.now(), command: "test" };
+      
+      const state = getWidgetState(runtime);
+      
+      // Should show dashboard, NOT "running..."
+      expect(state.type).toBe("dashboard");
+    });
+
+    it("shows dashboard instead of 'waiting_for_log' when results exist", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.state.results = [{
+        commit: "abc1234",
+        metric: 100,
+        metrics: {},
+        status: "keep",
+        description: "First run",
+        timestamp: Date.now(),
+        segment: 0,
+        confidence: null,
+      }];
+      runtime.experimentCompletedWaitingForLog = true;
+      runtime.lastRunSucceeded = true;
+      
+      const state = getWidgetState(runtime);
+      
+      // Should show dashboard, NOT "done"
+      expect(state.type).toBe("dashboard");
+    });
+
+    it("shows dashboard instead of 'ready' when results exist (edge case)", () => {
+      const runtime = createWidgetTestRuntime();
+      runtime.state.name = "Test Session";
+      runtime.state.results = [{
+        commit: "abc1234",
+        metric: 100,
+        metrics: {},
+        status: "keep",
+        description: "First run",
+        timestamp: Date.now(),
+        segment: 0,
+        confidence: null,
+      }];
+      // Even with no running/waiting flags, should show dashboard
+      
+      const state = getWidgetState(runtime);
+      
+      expect(state.type).toBe("dashboard");
     });
   });
 });
