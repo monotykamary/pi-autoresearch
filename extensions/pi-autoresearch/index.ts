@@ -497,6 +497,16 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   pi.on("session_switch", async (_e, ctx) => reconstructState(ctx));
   pi.on("session_fork", async (_e, ctx) => reconstructState(ctx));
   pi.on("session_tree", async (_e, ctx) => reconstructState(ctx));
+  
+  // Clear UI when starting a new session via /new - before the switch happens
+  pi.on("session_before_switch", async (event, ctx) => {
+    if (event.reason === "new") {
+      clearSessionUi(ctx);
+      // Clear the runtime store for this session to ensure clean state
+      runtimeStore.clear(getSessionKey(ctx));
+    }
+  });
+  
   pi.on("session_before_switch", async () => {
     clearOverlay();
   });
