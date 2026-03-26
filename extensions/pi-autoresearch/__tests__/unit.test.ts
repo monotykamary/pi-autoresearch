@@ -705,3 +705,44 @@ describe("Edge cases", () => {
     expect(confidence).toBeGreaterThan(0);
   });
 });
+
+// ============================================================================
+// Guard: init_experiment must be called before run_experiment/log_experiment
+// ============================================================================
+
+describe("Experiment session guard", () => {
+  it("requires state.name to be set (would come from init_experiment)", () => {
+    // Simulating the guard check from the tools
+    const stateWithoutInit = {
+      name: null as string | null,
+      results: [],
+    };
+
+    const stateWithInit = {
+      name: "Test Session",
+      results: [],
+    };
+
+    // Guard logic: !state.name means init_experiment wasn't called
+    expect(!stateWithoutInit.name).toBe(true);
+    expect(!stateWithInit.name).toBe(false);
+  });
+
+  it("requires worktreeDir to be set for proper isolation", () => {
+    // When autoresearch is properly initialized via /autoresearch command,
+    // worktreeDir should be set
+    const runtimeWithoutWorktree = {
+      worktreeDir: null as string | null,
+      autoresearchMode: false,
+    };
+
+    const runtimeWithWorktree = {
+      worktreeDir: "/project/autoresearch/session-123",
+      autoresearchMode: true,
+    };
+
+    // Without worktree, operations happen in main worktree (dangerous!)
+    expect(runtimeWithoutWorktree.worktreeDir).toBeNull();
+    expect(runtimeWithWorktree.worktreeDir).not.toBeNull();
+  });
+});

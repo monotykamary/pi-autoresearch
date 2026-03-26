@@ -1539,6 +1539,17 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
 
+      // Guard: require init_experiment to be called first
+      if (!state.name) {
+        return {
+          content: [{
+            type: "text",
+            text: `❌ Experiment session not initialized. Call init_experiment first to set up the session name, metric, and worktree isolation.`,
+          }],
+          details: {},
+        };
+      }
+
       // Validate working directory exists (worktree takes precedence if active)
       const workDirError = validateWorkDir(ctx.cwd, runtime);
       if (workDirError) {
@@ -2054,6 +2065,17 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
+
+      // Guard: require init_experiment to be called first
+      if (!state.name) {
+        return {
+          content: [{
+            type: "text",
+            text: `❌ Experiment session not initialized. Call init_experiment first to set up the session name, metric, and worktree isolation.`,
+          }],
+          details: {},
+        };
+      }
 
       // Validate working directory exists (worktree takes precedence if active)
       const workDirError = validateWorkDir(ctx.cwd, runtime);
