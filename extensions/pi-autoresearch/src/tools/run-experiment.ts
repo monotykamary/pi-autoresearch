@@ -317,6 +317,7 @@ export function registerRunExperiment(
         });
       }).finally(() => {
         runtime.runningExperiment = null;
+        runtime.experimentCompletedWaitingForLog = true;
         ctx.updateWidget(extCtx);
         if (ctx.overlayTui) ctx.overlayTui.requestRender();
       });

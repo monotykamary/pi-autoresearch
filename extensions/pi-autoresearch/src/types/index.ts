@@ -88,6 +88,8 @@ export interface AutoresearchRuntime {
   lastRunChecks: { pass: boolean; output: string; duration: number } | null;
   lastRunDuration: number | null;
   runningExperiment: { startedAt: number; command: string } | null;
+  /** True when run_experiment finished but log_experiment hasn't been called yet */
+  experimentCompletedWaitingForLog: boolean;
   state: ExperimentState;
   /** Path to the session-specific git worktree for isolation, or null if not using worktree */
   worktreeDir: string | null;

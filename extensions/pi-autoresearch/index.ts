@@ -103,12 +103,14 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     const runtime = getRuntime(ctx);
     const state = runtime.state;
 
-    if (state.results.length === 0) {
-      if (!runtime.runningExperiment) {
-        ctx.ui.setWidget("autoresearch", undefined);
-        return;
-      }
+    // Hide widget if no experiment activity at all
+    if (state.results.length === 0 && !runtime.runningExperiment && !runtime.experimentCompletedWaitingForLog) {
+      ctx.ui.setWidget("autoresearch", undefined);
+      return;
+    }
 
+    // Show "running" state when experiment is in progress
+    if (runtime.runningExperiment) {
       ctx.ui.setWidget("autoresearch", (_tui, theme) => {
         const parts = [
           theme.fg("accent", "🔬"),
@@ -121,6 +123,24 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
         parts.push(theme.fg("dim", ` │ ${runtime.runningExperiment!.command}`));
         parts.push(theme.fg("dim", "  (waiting for first logged result)"));
+
+        return new Text(parts.join(""), 0, 0);
+      });
+      return;
+    }
+
+    // Show "completed, waiting for log" state when run_experiment finished but log_experiment not called
+    if (runtime.experimentCompletedWaitingForLog && state.results.length === 0) {
+      ctx.ui.setWidget("autoresearch", (_tui, theme) => {
+        const parts = [
+          theme.fg("accent", "🔬"),
+          theme.fg("success", " ✅ completed"),
+          theme.fg("dim", "  (call log_experiment to record result)"),
+        ];
+
+        if (state.name) {
+          parts.push(theme.fg("dim", ` │ ${state.name}`));
+        }
 
         return new Text(parts.join(""), 0, 0);
       });
@@ -288,6 +308,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     runtime.lastRunChecks = null;
     runtime.lastRunDuration = null;
     runtime.runningExperiment = null;
+    runtime.experimentCompletedWaitingForLog = false;
     runtime.lastAutoResumeTime = 0;
     runtime.experimentsThisSession = 0;
     runtime.autoResumeTurns = 0;
@@ -475,6 +496,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   pi.on("agent_end", async (_event, ctx) => {
     const runtime = getRuntime(ctx);
     runtime.runningExperiment = null;
+    runtime.experimentCompletedWaitingForLog = false;
     if (overlayTui) overlayTui.requestRender();
 
     if (!runtime.autoresearchMode) return;

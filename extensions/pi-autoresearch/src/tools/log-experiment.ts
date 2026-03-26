@@ -338,6 +338,7 @@ export function registerLogExperiment(
       // Clear running experiment and checks state, and reset starting commit
       const wallClockSeconds = runtime.lastRunDuration;
       runtime.runningExperiment = null;
+      runtime.experimentCompletedWaitingForLog = false;
       runtime.lastRunChecks = null;
       runtime.lastRunDuration = null;
       runtime.startingCommit = null;

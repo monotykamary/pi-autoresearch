@@ -50,6 +50,7 @@ export function createSessionRuntime(): AutoresearchRuntime {
     lastRunChecks: null,
     lastRunDuration: null,
     runningExperiment: null,
+    experimentCompletedWaitingForLog: false,
     state: createExperimentState(),
     worktreeDir: null,
     startingCommit: null,
