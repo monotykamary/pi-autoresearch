@@ -154,7 +154,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           )
         );
 
-        lines.push(...renderDashboardLines(state, width, theme, 6, runtime.worktreeDir));
+        const worktreeDisplay = runtime.worktreeDir
+          ? getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir)
+          : null;
+        lines.push(...renderDashboardLines(state, width, theme, 6, worktreeDisplay));
 
         return new Text(lines.join("\n"), 0, 0);
       });
@@ -258,12 +261,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               }
             }
           }
-        }
-
-        // Show worktree indicator
-        if (runtime.worktreeDir) {
-          const displayPath = getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir);
-          parts.push(theme.fg("dim", ` │ 📁 ${displayPath}`));
         }
 
         if (state.name) {
@@ -612,7 +609,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               };
               const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
 
-              const content = renderDashboardLines(state, sectionW, theme, 0, runtime.worktreeDir);
+              const worktreeDisplay = runtime.worktreeDir
+                ? getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir)
+                : null;
+              const content = renderDashboardLines(state, sectionW, theme, 0, worktreeDisplay);
 
               // Add running experiment as next row in the list
               if (runtime.runningExperiment) {
@@ -692,7 +692,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               );
               const chromeRows = 5;
               const viewportRows = Math.max(4, overlayRows - chromeRows);
-              const totalRows = renderDashboardLines(state, lastSectionWidth, theme, 0, runtime.worktreeDir).length + (runtime.runningExperiment ? 1 : 0);
+              const worktreeDisplayRows = runtime.worktreeDir
+                ? getDisplayWorktreePath(ctx.cwd, runtime.worktreeDir)
+                : null;
+              const totalRows = renderDashboardLines(state, lastSectionWidth, theme, 0, worktreeDisplayRows).length + (runtime.runningExperiment ? 1 : 0);
               const maxScroll = Math.max(0, totalRows - viewportRows);
 
               if (matchesKey(data, "tui.escape") || data === "q") {
