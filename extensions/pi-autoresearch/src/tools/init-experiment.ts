@@ -42,6 +42,7 @@ export function registerInitExperiment(
 
       // Auto-create worktree if not already exists (for direct tool calls without /autoresearch)
       let worktreeCreated = false;
+      let worktreeFailed = false;
       if (!runtime.worktreeDir) {
         const worktreePath = await createAutoresearchWorktree(
           ctx.pi,
@@ -51,6 +52,8 @@ export function registerInitExperiment(
         if (worktreePath) {
           runtime.worktreeDir = worktreePath;
           worktreeCreated = true;
+        } else {
+          worktreeFailed = true;
         }
       }
 
@@ -120,7 +123,9 @@ export function registerInitExperiment(
           : "";
       const worktreeNote = worktreeCreated
         ? `\n📁 Created isolated worktree: ${getDisplayWorktreePath(extCtx.cwd, runtime.worktreeDir!)}`
-        : "";
+        : worktreeFailed
+          ? "\n⚠️ Worktree creation failed — running in main working directory (no isolation)"
+          : "";
       const workDirNote = workDir !== extCtx.cwd ? `\nWorking directory: ${workDir}` : "";
       return {
         content: [
