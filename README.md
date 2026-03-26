@@ -15,6 +15,10 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). W
 
 ![pi-autoresearch dashboard](pi-autoresearch.png)
 
+**Fullscreen overlay** (`Ctrl+Shift+X`) with chart visualization and detailed metrics:
+
+![autoresearch-fork dashboard](autoresearch-fork.jpg)
+
 ---
 
 ## Quick start
