@@ -276,3 +276,234 @@ describe("Worktree Integration", () => {
     expect(worktreeDir).toBeNull();
   });
 });
+
+// ============================================================================
+// Integration Tests: File Redirection
+// ============================================================================
+
+describe("File Redirection Integration", () => {
+  const testDir = path.join(__dirname, '.test-file-redirect');
+  let repoDir: string;
+  let worktreePath: string;
+  let mainCwd: string;
+
+  beforeEach(() => {
+    // Create a fresh git repo for each test
+    repoDir = path.join(testDir, `repo-${Date.now()}`);
+    mainCwd = repoDir;
+    fs.mkdirSync(repoDir, { recursive: true });
+    
+    // Initialize git repo
+    execSync('git init', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git config user.name "Test User"', { cwd: repoDir, stdio: 'ignore' });
+    
+    // Create initial commit
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Test Repo');
+    execSync('git add README.md', { cwd: repoDir, stdio: 'ignore' });
+    execSync('git commit -m "Initial commit"', { cwd: repoDir, stdio: 'ignore' });
+
+    // Create worktree
+    const sessionId = 'test-session-redirect';
+    worktreePath = path.join(repoDir, 'autoresearch', sessionId);
+    const branchName = `autoresearch/${sessionId}`;
+    
+    fs.mkdirSync(path.join(repoDir, 'autoresearch'), { recursive: true });
+    execSync(`git branch ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
+    execSync(`git worktree add ${worktreePath} ${branchName}`, { cwd: repoDir, stdio: 'ignore' });
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it("writes files to worktree when autoresearch is ON", async () => {
+    // Import the module under test
+    const { createWriteOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: true,
+      worktreeDir: worktreePath,
+    };
+
+    const ops = createWriteOperations(mainCwd, runtime);
+    
+    // Write a file using relative path
+    await ops.writeFile('src/test.ts', 'export const foo = 42;');
+    
+    // Verify file exists in worktree, not main repo
+    const worktreeFile = path.join(worktreePath, 'src', 'test.ts');
+    const mainRepoFile = path.join(mainCwd, 'src', 'test.ts');
+    
+    expect(fs.existsSync(worktreeFile)).toBe(true);
+    expect(fs.existsSync(mainRepoFile)).toBe(false);
+    
+    // Verify content
+    const content = fs.readFileSync(worktreeFile, 'utf-8');
+    expect(content).toBe('export const foo = 42;');
+  });
+
+  it("writes files to main repo when autoresearch is OFF", async () => {
+    const { createWriteOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: false,
+      worktreeDir: null,
+    };
+
+    const ops = createWriteOperations(mainCwd, runtime);
+    
+    // Write a file
+    await ops.writeFile('src/main.ts', 'export const bar = "hello";');
+    
+    // Verify file exists in main repo
+    const mainRepoFile = path.join(mainCwd, 'src', 'main.ts');
+    expect(fs.existsSync(mainRepoFile)).toBe(true);
+    
+    const content = fs.readFileSync(mainRepoFile, 'utf-8');
+    expect(content).toBe('export const bar = "hello";');
+  });
+
+  it("reads files from worktree when autoresearch is ON", async () => {
+    const { createReadOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: true,
+      worktreeDir: worktreePath,
+    };
+
+    // Pre-populate file in worktree only
+    fs.mkdirSync(path.join(worktreePath, 'data'), { recursive: true });
+    fs.writeFileSync(path.join(worktreePath, 'data', 'config.json'), '{"key": "worktree-value"}');
+    
+    const ops = createReadOperations(mainCwd, runtime);
+    
+    // Read using relative path
+    const content = await ops.readFile('data/config.json');
+    expect(content.toString()).toBe('{"key": "worktree-value"}');
+  });
+
+  it("reads files from main repo when autoresearch is OFF", async () => {
+    const { createReadOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: false,
+      worktreeDir: null,
+    };
+
+    // Pre-populate file in main repo
+    fs.mkdirSync(path.join(mainCwd, 'data'), { recursive: true });
+    fs.writeFileSync(path.join(mainCwd, 'data', 'config.json'), '{"key": "main-value"}');
+    
+    const ops = createReadOperations(mainCwd, runtime);
+    
+    // Read using relative path
+    const content = await ops.readFile('data/config.json');
+    expect(content.toString()).toBe('{"key": "main-value"}');
+  });
+
+  it("edit operations redirect to worktree", async () => {
+    const { createEditOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: true,
+      worktreeDir: worktreePath,
+    };
+
+    // Pre-populate file in worktree and main repo with different content
+    fs.mkdirSync(path.join(worktreePath, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(worktreePath, 'src', 'app.ts'), 'const x = 1;');
+    fs.mkdirSync(path.join(mainCwd, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(mainCwd, 'src', 'app.ts'), 'const x = 1;');
+    
+    const ops = createEditOperations(mainCwd, runtime);
+    
+    // Read original
+    const original = await ops.readFile('src/app.ts');
+    expect(original.toString()).toBe('const x = 1;');
+    
+    // Edit using absolute path (within main cwd)
+    const absolutePath = path.join(mainCwd, 'src', 'app.ts');
+    await ops.writeFile(absolutePath, 'const x = 2;');
+    
+    // Verify edit happened in worktree, not main repo
+    const worktreeContent = fs.readFileSync(path.join(worktreePath, 'src', 'app.ts'), 'utf-8');
+    const mainRepoContent = fs.readFileSync(path.join(mainCwd, 'src', 'app.ts'), 'utf-8');
+    
+    expect(worktreeContent).toBe('const x = 2;');
+    expect(mainRepoContent).toBe('const x = 1;');
+  });
+
+  it("mkdir creates directories in worktree", async () => {
+    const { createWriteOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: true,
+      worktreeDir: worktreePath,
+    };
+
+    const ops = createWriteOperations(mainCwd, runtime);
+    
+    // Create nested directory
+    await ops.mkdir('very/deep/nested/dir');
+    
+    // Verify in worktree
+    const worktreeDir = path.join(worktreePath, 'very', 'deep', 'nested', 'dir');
+    expect(fs.existsSync(worktreeDir)).toBe(true);
+    expect(fs.statSync(worktreeDir).isDirectory()).toBe(true);
+    
+    // Verify NOT in main repo
+    const mainRepoDir = path.join(mainCwd, 'very', 'deep', 'nested', 'dir');
+    expect(fs.existsSync(mainRepoDir)).toBe(false);
+  });
+
+  it("external paths are not redirected", async () => {
+    const { createWriteOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: true,
+      worktreeDir: worktreePath,
+    };
+
+    const ops = createWriteOperations(mainCwd, runtime);
+    
+    // Write to external path (outside main cwd)
+    const externalDir = path.join(testDir, 'external-location');
+    fs.mkdirSync(externalDir, { recursive: true });
+    const externalFile = path.join(externalDir, 'outside.txt');
+    
+    await ops.writeFile(externalFile, 'external content');
+    
+    // Verify file is at external location, not in worktree
+    expect(fs.existsSync(externalFile)).toBe(true);
+    expect(fs.readFileSync(externalFile, 'utf-8')).toBe('external content');
+    
+    // Verify NOT in worktree
+    const worktreeVersion = path.join(worktreePath, 'external-location', 'outside.txt');
+    expect(fs.existsSync(worktreeVersion)).toBe(false);
+  });
+
+  it("access checks work in worktree", async () => {
+    const { createReadOperations } = await import('../src/tools/file-redirect.js');
+    
+    const runtime = {
+      autoresearchMode: true,
+      worktreeDir: worktreePath,
+    };
+
+    // Create file in worktree
+    fs.writeFileSync(path.join(worktreePath, 'readable.txt'), 'can read this');
+    
+    const ops = createReadOperations(mainCwd, runtime);
+    
+    // Should not throw
+    await expect(ops.access('readable.txt')).resolves.toBeUndefined();
+    
+    // Non-existent file should throw
+    await expect(ops.access('nonexistent.txt')).rejects.toThrow();
+  });
+});

@@ -47,6 +47,7 @@ import {
   registerInitExperiment,
   registerRunExperiment,
   registerLogExperiment,
+  registerRedirectedFileTools,
 } from "./src/tools/index.js";
 import {
   BENCHMARK_GUARDRAIL,
@@ -498,7 +499,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       `\nExperiment rules: ${mdPath} — read this file at the start of every session and after compaction.`;
 
     if (runtime.worktreeDir) {
-      extra += `\n📁 Isolated worktree: ${worktreeDisplay} — all experiments run here, main working directory stays clean.`;
+      extra += `\n📁 Isolated worktree: ${worktreeDisplay} — all experiments AND file operations (read, edit, write) run here. Your main working directory stays clean.`;
     }
 
     extra +=
@@ -530,6 +531,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   // Register tools
   // -----------------------------------------------------------------------
 
+  registerRedirectedFileTools(pi, getRuntime);
   registerInitExperiment(pi, { pi, getRuntime, updateWidget, getSessionKey });
   registerRunExperiment(pi, { pi, getRuntime, updateWidget, overlayTui });
   registerLogExperiment(pi, { pi, getRuntime, updateWidget, overlayTui });
