@@ -190,24 +190,6 @@ A fresh agent with no memory can read `autoresearch.md` + `autoresearch.jsonl` a
 
 ---
 
-## Configuration (optional)
-
-Create `autoresearch.config.json` in your pi session directory to customize behavior:
-
-```json
-{
-  "workingDir": "/path/to/project",
-  "maxIterations": 50
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `workingDir` | string | Override the directory for all autoresearch operations — file I/O, command execution, and git. Supports absolute or relative paths (resolved against the pi session cwd). The config file itself always stays in the session cwd. Fails if the directory doesn't exist. |
-| `maxIterations` | number | Maximum experiments before auto-stopping. The agent is told to stop and won't run more experiments until a new segment is initialized. |
-
----
-
 ## Confidence scoring
 
 After 3+ experiments in a session, pi-autoresearch computes a **confidence score** — how the best improvement compares to the session's noise floor. This helps distinguish real gains from benchmark jitter, especially on noisy signals like ML training, Lighthouse scores, or flaky benchmarks.
@@ -276,15 +258,7 @@ The test suite includes:
 
 ## Controlling costs
 
-Autoresearch loops run autonomously and can burn through tokens. Two ways to cap spend:
-
-- **API key limits** — most providers let you set per-key or monthly budgets. Check your provider's dashboard.
-- **`maxIterations`** — cap experiments per session in `autoresearch.config.json`:
-   ```json
-   {
-     "maxIterations": 30
-   }
-   ```
+Autoresearch loops run autonomously and can burn through tokens. Set API key limits — most providers let you set per-key or monthly budgets. Check your provider's dashboard.
 
 ---
 

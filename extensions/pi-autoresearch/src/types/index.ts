@@ -99,8 +99,3 @@ export interface AutoresearchRuntime {
   /** File watcher for autoresearch.jsonl to enable real-time UI updates */
   jsonlWatcher: { close(): void } | null;
 }
-
-export interface AutoresearchConfig {
-  maxIterations?: number;
-  workingDir?: string;
-}

@@ -7,7 +7,7 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import { execSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { AutoresearchRuntime, AutoresearchConfig } from "../types/index.js";
+import type { AutoresearchRuntime } from "../types/index.js";
 
 /** Get the path to the global gitignore file */
 function getGlobalGitignorePath(): string | null {
@@ -76,30 +76,8 @@ function ensureGlobalGitignore(): void {
   }
 }
 
-/** Read autoresearch.config.json from the given directory */
-export function readConfig(cwd: string): AutoresearchConfig {
-  try {
-    const configPath = path.join(cwd, "autoresearch.config.json");
-    if (!fs.existsSync(configPath)) return {};
-    return JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-/** Read maxExperiments from autoresearch.config.json */
-export function readMaxExperiments(cwd: string): number | null {
-  const config = readConfig(cwd);
-  return typeof config.maxIterations === "number" && config.maxIterations > 0
-    ? Math.floor(config.maxIterations)
-    : null;
-}
-
 /**
  * Resolve the effective working directory.
- * Reads workingDir from autoresearch.config.json in ctxCwd.
- * Returns ctxCwd if not set. Supports relative (resolved against ctxCwd) and absolute paths.
- *
  * When in autoresearch mode with an active worktree, returns the worktree directory.
  */
 export function resolveWorkDir(
@@ -111,11 +89,7 @@ export function resolveWorkDir(
     return runtime.worktreeDir;
   }
 
-  const config = readConfig(ctxCwd);
-  if (!config.workingDir) return ctxCwd;
-  return path.isAbsolute(config.workingDir)
-    ? config.workingDir
-    : path.resolve(ctxCwd, config.workingDir);
+  return ctxCwd;
 }
 
 /** Detect autoresearch worktree by looking for autoresearch.jsonl in git worktrees */
@@ -165,10 +139,10 @@ export function validateWorkDir(
   try {
     const stat = fs.statSync(workDir);
     if (!stat.isDirectory()) {
-      return `workingDir "${workDir}" (from autoresearch.config.json) is not a directory.`;
+      return `workingDir "${workDir}" is not a directory.`;
     }
   } catch {
-    return `workingDir "${workDir}" (from autoresearch.config.json) does not exist.`;
+    return `workingDir "${workDir}" does not exist.`;
   }
   return null;
 }

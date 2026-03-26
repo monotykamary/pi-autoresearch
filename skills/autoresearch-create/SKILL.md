@@ -130,20 +130,6 @@ Use `log_experiment`'s `asi` parameter to annotate each run with **whatever woul
 
 **Annotate failures and crashes heavily.** Discarded and crashed runs are reverted — the code changes are gone. The only record that survives is the description and ASI in `autoresearch.jsonl`. If you don't capture what you tried and why it failed, future iterations will waste time re-discovering the same dead ends.
 
-### `autoresearch.config.json` (optional)
-
-JSON config file that lives in the pi session's working directory (`ctx.cwd`). Supported fields:
-
-- **`maxIterations`** (number) — maximum experiments before auto-stopping.
-- **`workingDir`** (string) — override the directory for all autoresearch operations: file I/O (`autoresearch.jsonl`, `autoresearch.md`, `autoresearch.sh`, `autoresearch.checks.sh`, `autoresearch.ideas.md`), command execution, and git operations. Supports absolute paths or relative paths (resolved against `ctx.cwd`). The config file itself always stays in `ctx.cwd`. Fails if the directory doesn't exist.
-
-```json
-{
-  "workingDir": "/path/to/project",
-  "maxIterations": 50
-}
-```
-
 ### `autoresearch.checks.sh` (optional)
 
 Bash script (`set -euo pipefail`) for backpressure/correctness checks: tests, types, lint, etc. **Only create this file when the user's constraints require correctness validation** (e.g., "tests must pass", "types must check").

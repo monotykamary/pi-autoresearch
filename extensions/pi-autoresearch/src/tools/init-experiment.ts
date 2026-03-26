@@ -8,7 +8,7 @@ import { Text } from "@mariozechner/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AutoresearchRuntime } from "../types/index.js";
 import { InitParams } from "./schemas.js";
-import { resolveWorkDir, validateWorkDir, readMaxExperiments, createAutoresearchWorktree, getDisplayWorktreePath } from "../git/index.js";
+import { resolveWorkDir, validateWorkDir, createAutoresearchWorktree, getDisplayWorktreePath } from "../git/index.js";
 import { resetForReinit } from "../state/index.js";
 
 interface InitToolContext {
@@ -85,9 +85,6 @@ export function registerInitExperiment(
         resetForReinit(state, true);
       }
 
-      // Read max experiments from config file
-      state.maxExperiments = readMaxExperiments(extCtx.cwd);
-
       // Write config header to jsonl
       try {
         const config = JSON.stringify({
@@ -127,10 +124,6 @@ export function registerInitExperiment(
       const reinitNote = isReinit
         ? " (re-initialized — previous results archived, new baseline needed)"
         : "";
-      const limitNote =
-        state.maxExperiments !== null
-          ? `\nMax iterations: ${state.maxExperiments} (from autoresearch.config.json)`
-          : "";
       const targetNote =
         state.targetValue !== null
           ? `\nTarget: ${state.targetValue}${state.metricUnit} (${state.bestDirection} is better) — loop stops when reached`
@@ -143,7 +136,7 @@ export function registerInitExperiment(
         content: [
           {
             type: "text",
-            text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${targetNote}${worktreeNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
+            text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${targetNote}${worktreeNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
           },
         ],
         details: {},
