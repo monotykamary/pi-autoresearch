@@ -1,6 +1,7 @@
 # JSONL as Source of Truth
 
 ## Overview
+
 The `autoresearch.jsonl` file is the **sole source of truth** for experiment state. This means:
 
 1. **Direct JSONL edits update the UI in real-time** — Edit the file and the dashboard updates automatically
@@ -17,6 +18,7 @@ The extension watches `autoresearch.jsonl` for changes using a file watcher. Whe
 3. The UI widget/dashboard updates automatically
 
 This works for:
+
 - Manual file edits
 - `log_experiment` tool calls
 - External processes writing to the file
@@ -24,6 +26,7 @@ This works for:
 ## How It Works
 
 ### State Reconstruction
+
 When a session starts/switches/forks, state is loaded **exclusively** from `autoresearch.jsonl`:
 
 1. Parse config header (from `init_experiment`) → sets metric name, unit, direction, etc.
@@ -44,6 +47,7 @@ If the JSONL doesn't exist or is corrupted, the state starts fresh (empty).
 ### Editing the JSONL
 
 You can safely:
+
 - Add/modify experiment lines (UI updates in real-time)
 - Change descriptions or metrics
 - Delete experiments (just remove the line)
@@ -52,23 +56,27 @@ You can safely:
 ## Implementation Details
 
 ### Removed Session-Based Reconstruction
+
 The following have been removed:
+
 - `LogDetails.state` — no longer includes full experiment state
 - `cloneExperimentState()` — function removed entirely
 - Session history fallback in `createStateReconstructor()` — removed
 
 ### Added File Watcher
+
 - `AutoresearchRuntime.jsonlWatcher` — tracks the active file watcher
 - `startJsonlWatcher()` — starts watching the JSONL file for changes
 - `stopJsonlWatcher()` — stops the watcher (cleanup)
 
 ### Key Functions
+
 ```typescript
 // Reads state exclusively from JSONL
-async function reconstructState(extCtx: ExtensionContext): Promise<void>
+async function reconstructState(extCtx: ExtensionContext): Promise<void>;
 
 // Watches JSONL for changes and updates UI
-function startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget): void
+function startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget): void;
 
 // Called by:
 // - session_switch / session_fork / session_tree (with worktree auto-detect)
@@ -76,6 +84,7 @@ function startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget): 
 ```
 
 ### Files Modified
+
 - `src/lifecycle/handlers.ts` — JSONL-only reconstruction, file watcher, removed session history fallback
 - `src/tools/log-experiment.ts` — removed state from tool result details
 - `src/tools/init-experiment.ts` — removed state from tool result details
@@ -85,7 +94,9 @@ function startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget): 
 - `src/command.ts` — detect existing worktrees, start watcher, stop watcher on off/clear
 
 ### Watcher Cleanup
+
 The watcher is stopped on:
+
 - Session shutdown
 - Session switch (before new session loads)
 - `/autoresearch off`

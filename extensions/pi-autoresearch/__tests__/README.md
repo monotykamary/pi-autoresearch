@@ -30,29 +30,29 @@ npm run test:coverage
 
 Tests for pure, stateless functions extracted from the extension:
 
-| Function | Description | Test Count |
-|----------|-------------|------------|
-| `parseMetricLines()` | Parses `METRIC name=value` lines from output | 10 |
-| `computeConfidence()` | Calculates confidence score using MAD | 8 |
-| `formatNum()` | Formats numbers with commas and units | 7 |
-| `isAutoresearchShCommand()` | Validates autoresearch.sh commands | 11 |
-| `isBetter()` | Compares metrics (lower/higher is better) | 4 |
-| `sortedMedian()` | Calculates median robustly | 6 |
-| `findBaselineMetric()` | Finds first metric in segment | 4 |
-| Edge cases | Various edge case scenarios | 6 |
+| Function                    | Description                                  | Test Count |
+| --------------------------- | -------------------------------------------- | ---------- |
+| `parseMetricLines()`        | Parses `METRIC name=value` lines from output | 10         |
+| `computeConfidence()`       | Calculates confidence score using MAD        | 8          |
+| `formatNum()`               | Formats numbers with commas and units        | 7          |
+| `isAutoresearchShCommand()` | Validates autoresearch.sh commands           | 11         |
+| `isBetter()`                | Compares metrics (lower/higher is better)    | 4          |
+| `sortedMedian()`            | Calculates median robustly                   | 6          |
+| `findBaselineMetric()`      | Finds first metric in segment                | 4          |
+| Edge cases                  | Various edge case scenarios                  | 6          |
 
 ### Integration Tests (`worktree.integration.test.ts`)
 
 Tests that create real git repositories and worktrees:
 
-| Test | Description |
-|------|-------------|
-| creates worktree with branch | Verifies worktree + branch creation |
-| lists worktrees correctly | Tests `git worktree list` output |
-| worktree is isolated from main repo | Confirms isolation properties |
-| removes worktree and cleans up | Tests cleanup procedures |
-| detects existing worktree | Verifies worktree detection logic |
-| autoresearch directory structure | Validates path structure |
+| Test                                | Description                         |
+| ----------------------------------- | ----------------------------------- |
+| creates worktree with branch        | Verifies worktree + branch creation |
+| lists worktrees correctly           | Tests `git worktree list` output    |
+| worktree is isolated from main repo | Confirms isolation properties       |
+| removes worktree and cleans up      | Tests cleanup procedures            |
+| detects existing worktree           | Verifies worktree detection logic   |
+| autoresearch directory structure    | Validates path structure            |
 
 ## Key Test Scenarios
 
@@ -70,6 +70,7 @@ const output = `
 ```
 
 Edge cases covered:
+
 - Prototype pollution protection (`__proto__`, `constructor`, `prototype`)
 - Invalid values (Infinity, NaN, non-numeric)
 - Duplicate names (last wins)
@@ -90,12 +91,14 @@ Tests verify the Median Absolute Deviation (MAD) based confidence scoring:
 The `isAutoresearchShCommand()` tests verify the security guard:
 
 **Allowed:**
+
 - `./autoresearch.sh`
 - `bash autoresearch.sh`
 - `DEBUG=1 ./autoresearch.sh`
 - `time nice -n 10 bash -x ./autoresearch.sh`
 
 **Rejected:**
+
 - `evil.sh; ./autoresearch.sh` (chaining)
 - `./other.sh autoresearch.sh` (wrong primary command)
 
@@ -115,13 +118,13 @@ Tests create real git repos in `/tmp` or `.test-worktrees/` and verify:
 Add to `unit.test.ts` following this pattern:
 
 ```typescript
-describe("myFunction", () => {
-  it("does what I expect", () => {
+describe('myFunction', () => {
+  it('does what I expect', () => {
     // Copy function from extension
     function myFunction(x: number): number {
       return x * 2;
     }
-    
+
     expect(myFunction(5)).toBe(10);
   });
 });
@@ -132,13 +135,13 @@ describe("myFunction", () => {
 Add to `worktree.integration.test.ts` following this pattern:
 
 ```typescript
-it("my worktree scenario", () => {
+it('my worktree scenario', () => {
   const sessionId = 'my-test';
   const worktreePath = path.join(repoDir, 'autoresearch', sessionId);
-  
+
   // Create worktree
   execSync(`git worktree add ${worktreePath}`, { cwd: repoDir });
-  
+
   // Test behavior
   expect(fs.existsSync(worktreePath)).toBe(true);
 });
@@ -152,9 +155,9 @@ Tests run on every PR and push to main. See `.github/workflows/test.yml`.
 
 Current coverage targets:
 
-| Metric | Target | Current |
-|--------|--------|---------|
-| Functions | 80% | ~75% |
-| Lines | 70% | ~65% |
+| Metric    | Target | Current |
+| --------- | ------ | ------- |
+| Functions | 80%    | ~75%    |
+| Lines     | 70%    | ~65%    |
 
 Note: Extension code that depends on the Pi Extension API is mocked or tested via integration tests.
