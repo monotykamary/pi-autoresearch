@@ -28,12 +28,19 @@ function renderScatterPlot(
 ): string[] {
   const lines: string[] = [];
   
-  // Only show current segment results
+  // Only show current segment results (last 20 for sliding window)
   const segmentResults = results.filter(r => r.segment === segment);
-  if (segmentResults.length === 0) return lines;
+  const windowSize = 20;
+  const startIdx = segmentResults.length > windowSize 
+    ? segmentResults.length - windowSize 
+    : 0;
+  const displayResults = segmentResults.slice(startIdx);
+  // Track original run numbers (1-indexed)
+  const runNumbers = displayResults.map((_, i) => startIdx + i + 1);
+  if (displayResults.length === 0) return lines;
   
-  // Find metric range
-  const metrics = segmentResults.map(r => r.metric);
+  // Find metric range from displayed results
+  const metrics = displayResults.map(r => r.metric);
   const minMetric = Math.min(...metrics);
   const maxMetric = Math.max(...metrics);
   const metricRange = maxMetric - minMetric || 1;
@@ -71,9 +78,9 @@ function renderScatterPlot(
     // Fill with points or spaces
     const gridRow: (string | null)[] = new Array(chartWidth).fill(null);
     
-    for (let i = 0; i < segmentResults.length; i++) {
-      const r = segmentResults[i];
-      const x = Math.floor((i / Math.max(segmentResults.length - 1, 1)) * (chartWidth - 1));
+    for (let i = 0; i < displayResults.length; i++) {
+      const r = displayResults[i];
+      const x = Math.floor((i / Math.max(displayResults.length - 1, 1)) * (chartWidth - 1));
       const y = (r.metric - minMetric) / metricRange;
       const yRow = Math.min(Math.floor((1 - y) * chartHeight), chartHeight - 1);
       
@@ -82,7 +89,7 @@ function renderScatterPlot(
         let symbol: string;
         let color: Parameters<typeof th.fg>[0];
         
-        if (currentRunIndex !== undefined && i === segmentResults.length - 1 && r.status !== "keep") {
+        if (currentRunIndex !== undefined && i === displayResults.length - 1 && r.status !== "keep") {
           // Currently running
           symbol = "◐";
           color = "warning";
@@ -162,11 +169,11 @@ function renderScatterPlot(
     }
   };
   
-  setLabel(firstCol, "1");
-  if (segmentResults.length > 2) {
-    setLabel(midCol, String(Math.ceil(segmentResults.length / 2)));
+  setLabel(firstCol, String(runNumbers[0]));
+  if (displayResults.length > 2) {
+    setLabel(midCol, String(runNumbers[Math.floor(displayResults.length / 2)]));
   }
-  setLabel(lastCol, String(segmentResults.length));
+  setLabel(lastCol, String(runNumbers[displayResults.length - 1]));
   
   lines.push(th.fg("muted", xLabelsLine.slice(0, width)));
   
@@ -306,11 +313,8 @@ export function renderDashboardLines(
       ));
     }
 
-    // Progress secondary metrics — wrap into lines that fit width, indented
+    // Progress secondary metrics — with "Metrics:" label for consistency
     if (st.secondaryMetrics.length > 0) {
-      const indent = "            "; // 12 chars to align under progress value
-      const maxLineW = width - 2 - indent.length; // 2 for leading "  "
-
       // Build individually-colored parts
       const secParts: string[] = [];
       for (const sm of st.secondaryMetrics) {
@@ -328,45 +332,52 @@ export function renderDashboardLines(
         }
       }
 
-      // Flow-wrap parts into lines
+      // Flow-wrap parts into lines with "Metrics:" label on first line
       if (secParts.length > 0) {
+        const metricsLabel = th.fg("muted", "Metrics:");
+        const prefix = `  ${metricsLabel}   ~ `;
+        const prefixWidth = visibleWidth(prefix);
+        const maxLineW = width - prefixWidth;
+        
         let curLine = "";
         let curVisW = 0;
+        let isFirstLine = true;
+        
         for (const part of secParts) {
           const partVisW = visibleWidth(part);
           const sep = curLine ? "  " : "";
+          
           if (curLine && curVisW + sep.length + partVisW > maxLineW) {
-            lines.push(
-              truncateToWidth(`  ${th.fg("dim", indent)}${curLine}`, width)
-            );
+            const linePrefix = isFirstLine ? prefix : " ".repeat(prefixWidth);
+            lines.push(truncateToWidth(`${linePrefix}${curLine}`, width));
             curLine = part;
             curVisW = partVisW;
+            isFirstLine = false;
           } else {
             curLine += sep + part;
             curVisW += sep.length + partVisW;
           }
         }
         if (curLine) {
-          lines.push(
-            truncateToWidth(`  ${th.fg("dim", indent)}${curLine}`, width)
-          );
+          const linePrefix = isFirstLine ? prefix : " ".repeat(prefixWidth);
+          lines.push(truncateToWidth(`${linePrefix}${curLine}`, width));
         }
       }
     }
   }
 
-  // Scatter plot visualization - only in fullscreen mode (maxRows === 0)
+  // Chart visualization - only in fullscreen mode (maxRows === 0)
   if (maxRows === 0 && st.results.length > 0) {
     lines.push("");
-    lines.push(th.fg("muted", "  Scatter plot:"));
-    const scatterLines = renderScatterPlot(
+    lines.push(th.fg("muted", "  Chart:"));
+    const chartLines = renderScatterPlot(
       st.results,
       st.currentSegment,
       st.metricUnit,
       width,
       th
     );
-    lines.push(...scatterLines);
+    lines.push(...chartLines);
   }
 
   lines.push("");
