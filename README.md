@@ -268,6 +268,25 @@ The test suite includes:
 
 ---
 
+## Prerequisites
+
+1. **Install pi** — follow the instructions at [pi.dev](https://pi.dev/)
+2. **An API key** for your preferred LLM provider (configured in pi)
+
+## Controlling costs
+
+Autoresearch loops run autonomously and can burn through tokens. Two ways to cap spend:
+
+- **API key limits** — most providers let you set per-key or monthly budgets. Check your provider's dashboard.
+- **`maxIterations`** — cap experiments per session in `autoresearch.config.json`:
+   ```json
+   {
+     "maxIterations": 30
+   }
+   ```
+
+---
+
 ## Divergence from Upstream
 
 This fork (`monotykamary/pi-autoresearch`) adds the following on top of [upstream](https://github.com/davebcn87/pi-autoresearch):
