@@ -44,6 +44,12 @@ export const InitParams = Type.Object({
         'Whether "lower" or "higher" is better for the primary metric. Default: "lower".',
     })
   ),
+  target_value: Type.Optional(
+    Type.Number({
+      description:
+        'Optional target threshold to auto-stop when reached. With direction="lower", stops when metric ≤ target_value. With direction="higher", stops when metric ≥ target_value.',
+    })
+  ),
 });
 
 export const LogParams = Type.Object({

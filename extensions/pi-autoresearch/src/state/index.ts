@@ -23,6 +23,7 @@ export function createExperimentState(): ExperimentState {
     currentSegment: 0,
     maxExperiments: null,
     confidence: null,
+    targetValue: null,
   };
 }
 

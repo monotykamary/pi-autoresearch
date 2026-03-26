@@ -903,3 +903,165 @@ describe("Experiment session guard", () => {
     expect(runtimeWithWorktree.worktreeDir).not.toBeNull();
   });
 });
+
+// ============================================================================
+// Tests: Target Value Feature
+// ============================================================================
+
+interface ExperimentStateWithTarget {
+  results: ExperimentResult[];
+  bestMetric: number | null;
+  bestDirection: "lower" | "higher";
+  metricName: string;
+  metricUnit: string;
+  targetValue: number | null;
+  currentSegment: number;
+}
+
+/**
+ * Check if target value has been reached (copied from log-experiment logic)
+ */
+function isTargetReached(
+  status: "keep" | "discard" | "crash" | "checks_failed",
+  metric: number,
+  targetValue: number | null,
+  direction: "lower" | "higher"
+): boolean {
+  if (status !== "keep") return false;
+  if (targetValue === null) return false;
+  if (metric <= 0) return false;
+  
+  return direction === "lower"
+    ? metric <= targetValue
+    : metric >= targetValue;
+}
+
+describe("Target value feature", () => {
+  describe("State initialization", () => {
+    it("initializes with null target value by default", () => {
+      const state: ExperimentStateWithTarget = {
+        results: [],
+        bestMetric: null,
+        bestDirection: "lower",
+        metricName: "metric",
+        metricUnit: "",
+        targetValue: null,
+        currentSegment: 0,
+      };
+
+      expect(state.targetValue).toBeNull();
+    });
+
+    it("can be initialized with a specific target value", () => {
+      const state: ExperimentStateWithTarget = {
+        results: [],
+        bestMetric: null,
+        bestDirection: "lower",
+        metricName: "latency_ms",
+        metricUnit: "ms",
+        targetValue: 100,
+        currentSegment: 0,
+      };
+
+      expect(state.targetValue).toBe(100);
+    });
+  });
+
+  describe("Target reached detection (direction: lower)", () => {
+    it("detects target reached when metric <= target (lower is better)", () => {
+      expect(isTargetReached("keep", 95, 100, "lower")).toBe(true);
+      expect(isTargetReached("keep", 100, 100, "lower")).toBe(true);
+      expect(isTargetReached("keep", 50, 100, "lower")).toBe(true);
+    });
+
+    it("does not detect target reached when metric > target (lower is better)", () => {
+      expect(isTargetReached("keep", 101, 100, "lower")).toBe(false);
+      expect(isTargetReached("keep", 150, 100, "lower")).toBe(false);
+    });
+  });
+
+  describe("Target reached detection (direction: higher)", () => {
+    it("detects target reached when metric >= target (higher is better)", () => {
+      expect(isTargetReached("keep", 0.95, 0.90, "higher")).toBe(true);
+      expect(isTargetReached("keep", 0.90, 0.90, "higher")).toBe(true);
+      expect(isTargetReached("keep", 1.0, 0.90, "higher")).toBe(true);
+    });
+
+    it("does not detect target reached when metric < target (higher is better)", () => {
+      expect(isTargetReached("keep", 0.89, 0.90, "higher")).toBe(false);
+      expect(isTargetReached("keep", 0.85, 0.90, "higher")).toBe(false);
+    });
+  });
+
+  describe("Target not reached edge cases", () => {
+    it("returns false for non-keep statuses regardless of metric", () => {
+      // All non-keep statuses should not trigger target reached
+      expect(isTargetReached("discard", 50, 100, "lower")).toBe(false);
+      expect(isTargetReached("crash", 50, 100, "lower")).toBe(false);
+      expect(isTargetReached("checks_failed", 50, 100, "lower")).toBe(false);
+      
+      // Even with perfect metric on crash, don't stop
+      expect(isTargetReached("crash", 0, 100, "lower")).toBe(false);
+    });
+
+    it("returns false when target value is null", () => {
+      expect(isTargetReached("keep", 50, null, "lower")).toBe(false);
+      expect(isTargetReached("keep", 999, null, "higher")).toBe(false);
+    });
+
+    it("returns false for zero or negative metrics", () => {
+      // Zero metric usually indicates a crash/bad state
+      expect(isTargetReached("keep", 0, 100, "lower")).toBe(false);
+      expect(isTargetReached("keep", -10, 100, "lower")).toBe(false);
+    });
+  });
+
+  describe("Target value formatNum display", () => {
+    it("formats target value with units correctly", () => {
+      expect(formatNum(100, "ms")).toBe("100ms");
+      expect(formatNum(2.5, "s")).toBe("2.50s");
+      expect(formatNum(1024, "kb")).toBe("1,024kb");
+    });
+
+    it("formats null target as em-dash", () => {
+      expect(formatNum(null, "ms")).toBe("—");
+    });
+  });
+
+  describe("Real-world scenarios", () => {
+    it("bundle size optimization: target <= 100KB", () => {
+      // Lower is better for bundle size
+      const target = 100; // KB
+      
+      // Baseline: 150KB
+      expect(isTargetReached("keep", 150, target, "lower")).toBe(false);
+      
+      // After optimization: 95KB - target reached!
+      expect(isTargetReached("keep", 95, target, "lower")).toBe(true);
+      
+      // Even better: 80KB - still target reached
+      expect(isTargetReached("keep", 80, target, "lower")).toBe(true);
+    });
+
+    it("accuracy optimization: target >= 0.95", () => {
+      // Higher is better for accuracy
+      const target = 0.95;
+      
+      // Baseline: 0.87
+      expect(isTargetReached("keep", 0.87, target, "higher")).toBe(false);
+      
+      // After improvement: 0.96 - target reached!
+      expect(isTargetReached("keep", 0.96, target, "higher")).toBe(true);
+    });
+
+    it("test speed optimization: target <= 30s", () => {
+      const target = 30; // seconds
+      
+      // Currently at 45s
+      expect(isTargetReached("keep", 45, target, "lower")).toBe(false);
+      
+      // Optimized to 28s - target reached!
+      expect(isTargetReached("keep", 28, target, "lower")).toBe(true);
+    });
+  });
+});

@@ -74,6 +74,7 @@ export function registerInitExperiment(
       if (params.direction === "lower" || params.direction === "higher") {
         state.bestDirection = params.direction;
       }
+      state.targetValue = params.target_value ?? null;
 
       // Start a new segment
       if (isReinit) {
@@ -93,6 +94,7 @@ export function registerInitExperiment(
           metricName: state.metricName,
           metricUnit: state.metricUnit,
           bestDirection: state.bestDirection,
+          targetValue: state.targetValue,
         });
         if (isReinit) {
           fs.appendFileSync(jsonlPath, config + "\n");
@@ -121,6 +123,10 @@ export function registerInitExperiment(
         state.maxExperiments !== null
           ? `\nMax iterations: ${state.maxExperiments} (from autoresearch.config.json)`
           : "";
+      const targetNote =
+        state.targetValue !== null
+          ? `\nTarget: ${state.targetValue}${state.metricUnit} (${state.bestDirection} is better) — loop stops when reached`
+          : "";      
       const worktreeNote = worktreeCreated
         ? `\n📁 Created isolated worktree: ${getDisplayWorktreePath(extCtx.cwd, runtime.worktreeDir!)}`
         : worktreeFailed
@@ -131,7 +137,7 @@ export function registerInitExperiment(
         content: [
           {
             type: "text",
-            text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${worktreeNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
+            text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${targetNote}${worktreeNote}${workDirNote}\nConfig written to autoresearch.jsonl. Now run the baseline with run_experiment.`,
           },
         ],
         details: { state: cloneExperimentState(state) },

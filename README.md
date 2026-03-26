@@ -263,8 +263,8 @@ npm run test:coverage
 ```
 
 The test suite includes:
-- **56 unit tests** for metric parsing, confidence calculation, number formatting, and command validation
-- **6 integration tests** for git worktree operations
+- **82 unit tests** for metric parsing, confidence calculation, number formatting, target value detection, and command validation
+- **17 integration tests** for git worktree operations
 
 ---
 

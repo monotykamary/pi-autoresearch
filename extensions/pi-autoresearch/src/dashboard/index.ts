@@ -118,6 +118,19 @@ export function renderDashboardLines(
 
     lines.push(truncateToWidth(progressLine, width));
 
+    // Show target if set
+    if (st.targetValue !== null) {
+      const reached = st.bestDirection === "lower"
+        ? bestPrimary <= st.targetValue
+        : bestPrimary >= st.targetValue;
+      const targetColor: Parameters<typeof th.fg>[0] = reached ? "success" : "muted";
+      const targetIcon = reached ? "🎯" : "→";
+      lines.push(truncateToWidth(
+        `  ${th.fg("muted", "Target:")}   ${th.fg(targetColor, `${targetIcon} ${formatNum(st.targetValue, st.metricUnit)}${reached ? " ✓ REACHED" : ""}`)}`,
+        width
+      ));
+    }
+
     // Progress secondary metrics — wrap into lines that fit width, indented
     if (st.secondaryMetrics.length > 0) {
       const indent = "            "; // 12 chars to align under progress value

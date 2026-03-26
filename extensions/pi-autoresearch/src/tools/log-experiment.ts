@@ -331,6 +331,20 @@ export function registerLogExperiment(
         runtime.autoresearchMode = false;
       }
 
+      // Check if target value reached (only on "keep" status)
+      const targetReached =
+        params.status === "keep" &&
+        state.targetValue !== null &&
+        params.metric > 0 &&
+        (state.bestDirection === "lower"
+          ? params.metric <= state.targetValue
+          : params.metric >= state.targetValue);
+      if (targetReached) {
+        text += `\n\n🎯 TARGET REACHED! ${state.metricName} = ${formatNum(params.metric, state.metricUnit)} (target: ${formatNum(state.targetValue, state.metricUnit)})`;
+        text += `\n✅ Optimization complete. STOP the experiment loop now.`;
+        runtime.autoresearchMode = false;
+      }
+
       ctx.updateWidget(extCtx);
       if (ctx.overlayTui) ctx.overlayTui.requestRender();
 

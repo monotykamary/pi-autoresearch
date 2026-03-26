@@ -234,6 +234,19 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           parts.push(theme.fg(confColor, `conf: ${confStr}×`));
         }
 
+        // Show target value progress
+        if (state.targetValue !== null && displayVal !== null) {
+          const reached = state.bestDirection === "lower"
+            ? displayVal <= state.targetValue
+            : displayVal >= state.targetValue;
+          parts.push(theme.fg("dim", " │ "));
+          if (reached) {
+            parts.push(theme.fg("success", `🎯 ${formatNum(state.targetValue, state.metricUnit)} ✓`));
+          } else {
+            parts.push(theme.fg("muted", `→ ${formatNum(state.targetValue, state.metricUnit)}`));
+          }
+        }
+
         // Show secondary metrics with delta %
         if (state.secondaryMetrics.length > 0) {
           for (const sm of state.secondaryMetrics) {
@@ -314,6 +327,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
               if (entry.metricName) state.metricName = entry.metricName;
               if (entry.metricUnit !== undefined) state.metricUnit = entry.metricUnit;
               if (entry.bestDirection) state.bestDirection = entry.bestDirection;
+              if (entry.targetValue !== undefined) state.targetValue = entry.targetValue ?? null;
               if (state.results.length > 0) {
                 segment++;
                 state.secondaryMetrics = [];

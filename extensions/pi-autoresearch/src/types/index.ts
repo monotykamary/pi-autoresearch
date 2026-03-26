@@ -47,6 +47,8 @@ export interface ExperimentState {
   maxExperiments: number | null;
   /** Current session confidence score (best improvement / noise floor). null if insufficient data. */
   confidence: number | null;
+  /** Target value to auto-stop when reached. null = no target. */
+  targetValue: number | null;
 }
 
 export interface RunDetails {
