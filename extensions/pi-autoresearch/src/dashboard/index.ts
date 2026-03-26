@@ -22,7 +22,8 @@ export function renderDashboardLines(
   st: ExperimentState,
   width: number,
   th: Theme,
-  maxRows: number = 6
+  maxRows: number = 6,
+  worktreePath: string | null = null
 ): string[] {
   const lines: string[] = [];
 
@@ -91,6 +92,16 @@ export function renderDashboardLines(
       width
     )
   );
+
+  // Worktree path (if in isolated worktree)
+  if (worktreePath) {
+    lines.push(
+      truncateToWidth(
+        `  ${th.fg("muted", "Worktree:")} ${th.fg("dim", `📁 ${worktreePath}`)}`,
+        width
+      )
+    );
+  }
 
   // Baseline: first run's primary metric
   const baselineSuffix =
