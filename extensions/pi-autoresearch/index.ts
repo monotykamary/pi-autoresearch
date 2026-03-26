@@ -864,9 +864,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           ctx.ui.notify(`Created autoresearch worktree: ${displayPath}`, "info");
         } else {
           ctx.ui.notify(
-            "Failed to create autoresearch worktree, using main working directory",
-            "warning"
+            "Failed to create autoresearch worktree — isolation required",
+            "error"
           );
+          return;
         }
       }
 
