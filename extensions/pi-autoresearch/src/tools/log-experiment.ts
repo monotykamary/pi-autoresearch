@@ -399,7 +399,7 @@ export function registerLogExperiment(pi: ExtensionAPI, ctx: LogToolContext) {
       if (s.bestMetric !== null) {
         let best = s.bestMetric;
         for (const r of s.results) {
-          if (r.segment === s.currentSegment && r.status === 'keep' && r.metric > 0) {
+          if (r.status === 'keep' && r.metric > 0) {
             if (isBetter(r.metric, best, s.bestDirection)) best = r.metric;
           }
         }
