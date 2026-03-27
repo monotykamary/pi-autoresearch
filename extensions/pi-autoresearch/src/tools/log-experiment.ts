@@ -43,6 +43,19 @@ export function registerLogExperiment(pi: ExtensionAPI, ctx: LogToolContext) {
       const runtime = ctx.getRuntime(extCtx);
       const state = runtime.state;
 
+      // Guard: require autoresearch mode to be active (prevents logging after legitimate stop)
+      if (!runtime.autoresearchMode) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `❌ Autoresearch mode is not active. The experiment loop was paused when the agent stopped. Call init_experiment to resume the experiment session and re-enable file redirection.`,
+            },
+          ],
+          details: {},
+        };
+      }
+
       // Guard: require init_experiment to be called first
       if (!state.name) {
         return {

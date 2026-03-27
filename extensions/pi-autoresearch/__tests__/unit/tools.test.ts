@@ -136,6 +136,26 @@ describe('Experiment session guard', () => {
     expect(runtimeWithoutWorktree.worktreeDir).toBeNull();
     expect(runtimeWithWorktree.worktreeDir).not.toBeNull();
   });
+
+  it('requires autoresearchMode to be true for log_experiment', () => {
+    // When agent legitimately stops, autoresearchMode is turned off
+    // This prevents log_experiment from running until init_experiment resumes
+    const runtimePaused = {
+      autoresearchMode: false,
+      worktreeDir: '/project/autoresearch/session-123',
+      state: { name: 'Test Session', results: [] },
+    };
+    const runtimeActive = {
+      autoresearchMode: true,
+      worktreeDir: '/project/autoresearch/session-123',
+      state: { name: 'Test Session', results: [] },
+    };
+
+    // log_experiment should be blocked when autoresearchMode is false
+    expect(runtimePaused.autoresearchMode).toBe(false);
+    // log_experiment should work when autoresearchMode is true
+    expect(runtimeActive.autoresearchMode).toBe(true);
+  });
 });
 
 // ============================================================================

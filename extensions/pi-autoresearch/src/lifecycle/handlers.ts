@@ -266,6 +266,14 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
 
     if (!runtime.autoresearchMode) return;
 
+    // Turn off autoresearchMode when agent legitimately stops (not mid-experiment)
+    // This disables file redirection until init_experiment is called again
+    runtime.autoresearchMode = false;
+    extCtx.ui.notify(
+      'Autoresearch mode paused — file redirection disabled. Call init_experiment to resume.',
+      'info'
+    );
+
     // Don't auto-resume if no experiments ran this session
     if (runtime.experimentsThisSession === 0) return;
 
