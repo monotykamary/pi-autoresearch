@@ -7,17 +7,17 @@ import type {
   AutoresearchRuntime,
   ExperimentResult,
   MetricDef,
-} from "../types/index.js";
-import { inferUnit, computeConfidence, currentResults } from "../utils/index.js";
+} from '../types/index.js';
+import { inferUnit, computeConfidence } from '../utils/index.js';
 
 /** Create a fresh experiment state */
 export function createExperimentState(): ExperimentState {
   return {
     results: [],
     bestMetric: null,
-    bestDirection: "lower",
-    metricName: "metric",
-    metricUnit: "",
+    bestDirection: 'lower',
+    metricName: 'metric',
+    metricUnit: '',
     secondaryMetrics: [],
     name: null,
     currentSegment: 0,
@@ -84,30 +84,20 @@ export function registerSecondaryMetrics(
 }
 
 /** Update state after logging a new experiment */
-export function updateStateAfterLog(
-  state: ExperimentState,
-  experiment: ExperimentResult
-): void {
+export function updateStateAfterLog(state: ExperimentState, experiment: ExperimentResult): void {
   // Register any new secondary metric names
   registerSecondaryMetrics(state, experiment.metrics);
 
-  // Recalculate baseline
-  state.bestMetric = currentResults(state.results, state.currentSegment)[0]?.metric ?? null;
+  // Recalculate baseline (first result overall)
+  state.bestMetric = state.results[0]?.metric ?? null;
 
-  // Recalculate confidence
-  state.confidence = computeConfidence(
-    state.results,
-    state.currentSegment,
-    state.bestDirection
-  );
+  // Recalculate confidence across all results
+  state.confidence = computeConfidence(state.results, state.bestDirection);
   experiment.confidence = state.confidence;
 }
 
 /** Reset runtime state for a new segment/reinit */
-export function resetForReinit(
-  state: ExperimentState,
-  incrementSegment: boolean = true
-): void {
+export function resetForReinit(state: ExperimentState, incrementSegment: boolean = true): void {
   if (incrementSegment) {
     state.currentSegment++;
   }

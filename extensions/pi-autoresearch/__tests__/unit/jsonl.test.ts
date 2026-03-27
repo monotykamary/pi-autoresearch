@@ -159,7 +159,7 @@ describe('JSONL reconstruction', () => {
 
     // Mock the reconstruction
     const { createExperimentState } = await import('../../src/state/index.js');
-    const { computeConfidence, currentResults } = await import('../../src/utils/stats.js');
+    const { computeConfidence } = await import('../../src/utils/stats.js');
     const state = createExperimentState();
 
     // Parse JSONL
@@ -189,12 +189,8 @@ describe('JSONL reconstruction', () => {
 
     // Recalculate derived state
     if (state.results.length > 0) {
-      state.bestMetric = currentResults(state.results, state.currentSegment)[0]?.metric ?? null;
-      state.confidence = computeConfidence(
-        state.results,
-        state.currentSegment,
-        state.bestDirection
-      );
+      state.bestMetric = state.results[0]?.metric ?? null;
+      state.confidence = computeConfidence(state.results, state.bestDirection);
     }
 
     expect(state.name).toBe('Test Session');

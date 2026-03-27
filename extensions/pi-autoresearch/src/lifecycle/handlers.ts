@@ -2,18 +2,18 @@
  * Session lifecycle event handlers
  */
 
-import * as path from "node:path";
-import * as fs from "node:fs";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { AutoresearchRuntime, ExperimentResult } from "../types/index.js";
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { AutoresearchRuntime, ExperimentResult } from '../types/index.js';
 import {
   createExperimentState,
   resetSessionCounters,
   registerSecondaryMetrics,
-} from "../state/index.js";
-import { computeConfidence, currentResults } from "../utils/stats.js";
-import { resolveWorkDir } from "../git/index.js";
-import { BENCHMARK_GUARDRAIL, MAX_AUTORESUME_TURNS } from "../constants.js";
+} from '../state/index.js';
+import { computeConfidence } from '../utils/stats.js';
+import { resolveWorkDir } from '../git/index.js';
+import { BENCHMARK_GUARDRAIL, MAX_AUTORESUME_TURNS } from '../constants.js';
 
 /** Dependencies needed by lifecycle handlers */
 export interface LifecycleContext {
@@ -49,7 +49,7 @@ function startJsonlWatcher(
   stopJsonlWatcher(runtime);
 
   const workDir = resolveWorkDir(extCtx.cwd, runtime);
-  const jsonlPath = path.join(workDir, "autoresearch.jsonl");
+  const jsonlPath = path.join(workDir, 'autoresearch.jsonl');
 
   if (!fs.existsSync(jsonlPath)) {
     return;
@@ -99,13 +99,13 @@ export function createStateReconstructor(ctx: LifecycleContext) {
 
     let state = runtime.state;
     const workDir = resolveWorkDir(extCtx.cwd, runtime);
-    const jsonlPath = path.join(workDir, "autoresearch.jsonl");
+    const jsonlPath = path.join(workDir, 'autoresearch.jsonl');
 
     // Load from JSONL file (sole source of truth)
     if (fs.existsSync(jsonlPath)) {
       try {
-        const content = fs.readFileSync(jsonlPath, "utf-8");
-        const lines = content.trim().split("\n").filter(Boolean);
+        const content = fs.readFileSync(jsonlPath, 'utf-8');
+        const lines = content.trim().split('\n').filter(Boolean);
 
         for (const line of lines) {
           try {
@@ -114,22 +114,22 @@ export function createStateReconstructor(ctx: LifecycleContext) {
             // Config header (from init_experiment)
             if (entry.name && !entry.run) {
               state.name = entry.name;
-              state.metricName = entry.metric_name ?? "metric";
-              state.metricUnit = entry.metric_unit ?? "";
-              state.bestDirection = entry.direction ?? "lower";
+              state.metricName = entry.metric_name ?? 'metric';
+              state.metricUnit = entry.metric_unit ?? '';
+              state.bestDirection = entry.direction ?? 'lower';
               state.targetValue = entry.target_value ?? null;
               state.maxExperiments = entry.max_experiments ?? null;
               state.currentSegment = entry.segment ?? 0;
             }
 
             // Experiment result (from log_experiment)
-            if (entry.run && typeof entry.run === "number") {
+            if (entry.run && typeof entry.run === 'number') {
               const experiment: ExperimentResult = {
-                commit: entry.commit ?? "unknown",
+                commit: entry.commit ?? 'unknown',
                 metric: entry.metric ?? 0,
                 metrics: entry.metrics ?? {},
-                status: entry.status ?? "discard",
-                description: entry.description ?? "",
+                status: entry.status ?? 'discard',
+                description: entry.description ?? '',
                 timestamp: entry.timestamp ?? Date.now(),
                 segment: entry.segment ?? 0,
                 confidence: entry.confidence ?? null,
@@ -149,16 +149,11 @@ export function createStateReconstructor(ctx: LifecycleContext) {
 
         // Recalculate derived state from loaded results
         if (state.results.length > 0) {
-          // Recalculate baseline
-          const segmentResults = currentResults(state.results, state.currentSegment);
-          state.bestMetric = segmentResults[0]?.metric ?? null;
+          // Recalculate baseline (first result overall)
+          state.bestMetric = state.results[0]?.metric ?? null;
 
-          // Recalculate confidence
-          state.confidence = computeConfidence(
-            state.results,
-            state.currentSegment,
-            state.bestDirection
-          );
+          // Recalculate confidence across all results
+          state.confidence = computeConfidence(state.results, state.bestDirection);
         }
 
         runtime.state = state;
@@ -196,11 +191,11 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
   const reconstructState = createStateReconstructor(ctx);
 
   // Session events - only on switch/fork/tree (existing sessions), not on new
-  pi.on("session_switch", async (_e, extCtx) => {
+  pi.on('session_switch', async (_e, extCtx) => {
     // Auto-detect worktree for existing sessions
     const runtime = getRuntime(extCtx);
     if (!runtime.worktreeDir) {
-      const { detectAutoresearchWorktree } = await import("../git/index.js");
+      const { detectAutoresearchWorktree } = await import('../git/index.js');
       const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
       if (detected) {
         runtime.worktreeDir = detected;
@@ -209,11 +204,11 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     await reconstructState(extCtx);
     startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget);
   });
-  pi.on("session_fork", async (_e, extCtx) => {
+  pi.on('session_fork', async (_e, extCtx) => {
     // Auto-detect worktree for existing sessions
     const runtime = getRuntime(extCtx);
     if (!runtime.worktreeDir) {
-      const { detectAutoresearchWorktree } = await import("../git/index.js");
+      const { detectAutoresearchWorktree } = await import('../git/index.js');
       const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
       if (detected) {
         runtime.worktreeDir = detected;
@@ -222,11 +217,11 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     await reconstructState(extCtx);
     startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget);
   });
-  pi.on("session_tree", async (_e, extCtx) => {
+  pi.on('session_tree', async (_e, extCtx) => {
     // Auto-detect worktree for existing sessions
     const runtime = getRuntime(extCtx);
     if (!runtime.worktreeDir) {
-      const { detectAutoresearchWorktree } = await import("../git/index.js");
+      const { detectAutoresearchWorktree } = await import('../git/index.js');
       const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
       if (detected) {
         runtime.worktreeDir = detected;
@@ -237,33 +232,33 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
   });
 
   // Clear UI when starting a new session via /new - before the switch happens
-  pi.on("session_before_switch", async (event, extCtx) => {
+  pi.on('session_before_switch', async (event, extCtx) => {
     // Stop watcher on current session before switching
     stopJsonlWatcher(getRuntime(extCtx));
-    if (event.reason === "new") {
+    if (event.reason === 'new') {
       clearSessionUi(extCtx);
       // Clear the runtime store for this session to ensure clean state
       runtimeStore.clear(getSessionKey(extCtx));
     }
   });
 
-  pi.on("session_before_switch", async () => {
+  pi.on('session_before_switch', async () => {
     clearOverlay();
   });
 
-  pi.on("session_shutdown", async (_e, extCtx) => {
+  pi.on('session_shutdown', async (_e, extCtx) => {
     stopJsonlWatcher(getRuntime(extCtx));
     clearSessionUi(extCtx);
     runtimeStore.clear(getSessionKey(extCtx));
   });
 
   // Reset per-session experiment counter when agent starts
-  pi.on("agent_start", async (_event, extCtx) => {
+  pi.on('agent_start', async (_event, extCtx) => {
     resetSessionCounters(getRuntime(extCtx));
   });
 
   // Clear running experiment state when agent stops; check ideas file for continuation
-  pi.on("agent_end", async (_event, extCtx) => {
+  pi.on('agent_end', async (_event, extCtx) => {
     const runtime = getRuntime(extCtx);
     runtime.runningExperiment = null;
     runtime.experimentCompletedWaitingForLog = false;
@@ -282,20 +277,20 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     if (runtime.autoResumeTurns >= MAX_AUTORESUME_TURNS) {
       extCtx.ui.notify(
         `Autoresearch auto-resume limit reached (${MAX_AUTORESUME_TURNS} turns)`,
-        "info"
+        'info'
       );
       return;
     }
 
     const workDir = resolveWorkDir(extCtx.cwd, runtime);
-    const ideasPath = path.join(workDir, "autoresearch.ideas.md");
+    const ideasPath = path.join(workDir, 'autoresearch.ideas.md');
     const hasIdeas = fs.existsSync(ideasPath);
 
     let resumeMsg =
-      "Autoresearch loop ended (likely context limit). Resume the experiment loop — read autoresearch.md and git log for context.";
+      'Autoresearch loop ended (likely context limit). Resume the experiment loop — read autoresearch.md and git log for context.';
     if (hasIdeas) {
       resumeMsg +=
-        " Check autoresearch.ideas.md for promising paths to explore. Prune stale/tried ideas.";
+        ' Check autoresearch.ideas.md for promising paths to explore. Prune stale/tried ideas.';
     }
     resumeMsg += ` ${BENCHMARK_GUARDRAIL}`;
 
@@ -303,5 +298,9 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     pi.sendUserMessage(resumeMsg);
   });
 
-  return { reconstructState, startWatcher: (extCtx: ExtensionContext) => startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget) };
+  return {
+    reconstructState,
+    startWatcher: (extCtx: ExtensionContext) =>
+      startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget),
+  };
 }

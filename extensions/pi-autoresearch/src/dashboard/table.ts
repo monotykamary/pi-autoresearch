@@ -2,18 +2,11 @@
  * Dashboard table rendering for experiment results
  */
 
-import type { Theme } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import type { ExperimentState, ExperimentResult } from "../types/index.js";
-import {
-  formatNum,
-  isBetter,
-  currentResults,
-  findBaselineMetric,
-  findBaselineSecondary,
-  findBaselineRunNumber,
-} from "../utils/index.js";
-import { renderScatterPlot } from "./scatter-plot.js";
+import type { Theme } from '@mariozechner/pi-coding-agent';
+import { truncateToWidth, visibleWidth } from '@mariozechner/pi-tui';
+import type { ExperimentState, ExperimentResult } from '../types/index.js';
+import { formatNum, isBetter } from '../utils/index.js';
+import { renderScatterPlot } from './scatter-plot.js';
 
 /**
  * Render dashboard lines as pure text (no UI deps)
@@ -29,36 +22,28 @@ export function renderDashboardLines(
   const lines: string[] = [];
 
   if (st.results.length === 0) {
-    lines.push(`  ${th.fg("dim", "No experiments yet.")}`);
+    lines.push(`  ${th.fg('dim', 'No experiments yet.')}`);
     return lines;
   }
 
-  const cur = currentResults(st.results, st.currentSegment);
-  const kept = cur.filter((r) => r.status === "keep").length;
-  const discarded = cur.filter((r) => r.status === "discard").length;
-  const crashed = cur.filter((r) => r.status === "crash").length;
-  const checksFailed = cur.filter((r) => r.status === "checks_failed").length;
+  const cur = st.results;
+  const kept = cur.filter((r) => r.status === 'keep').length;
+  const discarded = cur.filter((r) => r.status === 'discard').length;
+  const crashed = cur.filter((r) => r.status === 'crash').length;
+  const checksFailed = cur.filter((r) => r.status === 'checks_failed').length;
 
   const baseline = st.bestMetric;
-  const baselineRunNumber = findBaselineRunNumber(st.results, st.currentSegment);
-  const baselineSec = findBaselineSecondary(
-    st.results,
-    st.currentSegment,
-    st.secondaryMetrics
-  );
+  const baselineRunNumber = st.results.length > 0 ? 1 : null;
+  const baselineSec = st.results.length > 0 ? (st.results[0].metrics ?? {}) : {};
 
-  // Find best kept primary metric and its run number (current segment only)
+  // Find best kept primary metric and its run number
   let bestPrimary: number | null = null;
   let bestSecondary: Record<string, number> = {};
   let bestRunNum = 0;
   for (let i = st.results.length - 1; i >= 0; i--) {
     const r = st.results[i];
-    if (r.segment !== st.currentSegment) continue;
-    if (r.status === "keep" && r.metric > 0) {
-      if (
-        bestPrimary === null ||
-        isBetter(r.metric, bestPrimary, st.bestDirection)
-      ) {
+    if (r.status === 'keep' && r.metric > 0) {
+      if (bestPrimary === null || isBetter(r.metric, bestPrimary, st.bestDirection)) {
         bestPrimary = r.metric;
         bestSecondary = r.metrics ?? {};
         bestRunNum = i + 1;
@@ -72,24 +57,18 @@ export function renderDashboardLines(
       ? (() => {
           const confStr = st.confidence!.toFixed(1);
           const confColor: Parameters<typeof th.fg>[0] =
-            st.confidence! >= 2.0
-              ? "success"
-              : st.confidence! >= 1.0
-                ? "warning"
-                : "error";
+            st.confidence! >= 2.0 ? 'success' : st.confidence! >= 1.0 ? 'warning' : 'error';
           return `  ${th.fg(confColor, `(conf: ${confStr}×)`)}`;
         })()
-      : "";
+      : '';
   lines.push(
     truncateToWidth(
-      `  ${th.fg("muted", "Runs:")} ${th.fg("text", String(st.results.length))}` +
-        `  ${th.fg("success", `${kept} kept`)}` +
+      `  ${th.fg('muted', 'Runs:')} ${th.fg('text', String(st.results.length))}` +
+        `  ${th.fg('success', `${kept} kept`)}` +
         confSuffix +
-        (discarded > 0 ? `  ${th.fg("warning", `${discarded} discarded`)}` : "") +
-        (crashed > 0 ? `  ${th.fg("error", `${crashed} crashed`)}` : "") +
-        (checksFailed > 0
-          ? `  ${th.fg("error", `${checksFailed} checks failed`)}`
-          : ""),
+        (discarded > 0 ? `  ${th.fg('warning', `${discarded} discarded`)}` : '') +
+        (crashed > 0 ? `  ${th.fg('error', `${crashed} crashed`)}` : '') +
+        (checksFailed > 0 ? `  ${th.fg('error', `${checksFailed} checks failed`)}` : ''),
       width
     )
   );
@@ -98,33 +77,29 @@ export function renderDashboardLines(
   if (worktreePath) {
     lines.push(
       truncateToWidth(
-        `  ${th.fg("muted", "Worktree:")} ${th.fg("dim", `📁 ${worktreePath}`)}`,
+        `  ${th.fg('muted', 'Worktree:')} ${th.fg('dim', `📁 ${worktreePath}`)}`,
         width
       )
     );
   }
 
   // Baseline: first run's primary metric
-  const baselineSuffix =
-    baselineRunNumber === null ? "" : ` #${baselineRunNumber}`;
+  const baselineSuffix = baselineRunNumber === null ? '' : ` #${baselineRunNumber}`;
   lines.push(
     truncateToWidth(
-      `  ${th.fg("muted", "Baseline:")} ${th.fg("muted", `★ ${st.metricName}: ${formatNum(baseline, st.metricUnit)}${baselineSuffix}`)}`,
+      `  ${th.fg('muted', 'Baseline:')} ${th.fg('muted', `★ ${st.metricName}: ${formatNum(baseline, st.metricUnit)}${baselineSuffix}`)}`,
       width
     )
   );
 
   // Progress: best primary metric with delta + run number
   if (bestPrimary !== null) {
-    let progressLine =
-      `  ${th.fg("muted", "Progress:")} ${th.fg("warning", th.bold(`★ ${st.metricName}: ${formatNum(bestPrimary, st.metricUnit)}`))}${th.fg("dim", ` #${bestRunNum}`)}`;
+    let progressLine = `  ${th.fg('muted', 'Progress:')} ${th.fg('warning', th.bold(`★ ${st.metricName}: ${formatNum(bestPrimary, st.metricUnit)}`))}${th.fg('dim', ` #${bestRunNum}`)}`;
 
     if (baseline !== null && baseline !== 0 && bestPrimary !== baseline) {
       const pct = ((bestPrimary - baseline) / baseline) * 100;
-      const sign = pct > 0 ? "+" : "";
-      const color = isBetter(bestPrimary, baseline, st.bestDirection)
-        ? "success"
-        : "error";
+      const sign = pct > 0 ? '+' : '';
+      const color = isBetter(bestPrimary, baseline, st.bestDirection) ? 'success' : 'error';
       progressLine += th.fg(color, ` (${sign}${pct.toFixed(1)}%)`);
     }
 
@@ -132,15 +107,18 @@ export function renderDashboardLines(
 
     // Show target if set
     if (st.targetValue !== null) {
-      const reached = st.bestDirection === "lower"
-        ? bestPrimary <= st.targetValue
-        : bestPrimary >= st.targetValue;
-      const targetColor: Parameters<typeof th.fg>[0] = reached ? "success" : "muted";
-      const targetIcon = reached ? "🎯" : "→";
-      lines.push(truncateToWidth(
-        `  ${th.fg("muted", "Target:")}   ${th.fg(targetColor, `${targetIcon} ${formatNum(st.targetValue, st.metricUnit)}${reached ? " ✓ REACHED" : ""}`)}`,
-        width
-      ));
+      const reached =
+        st.bestDirection === 'lower'
+          ? bestPrimary <= st.targetValue
+          : bestPrimary >= st.targetValue;
+      const targetColor: Parameters<typeof th.fg>[0] = reached ? 'success' : 'muted';
+      const targetIcon = reached ? '🎯' : '→';
+      lines.push(
+        truncateToWidth(
+          `  ${th.fg('muted', 'Target:')}   ${th.fg(targetColor, `${targetIcon} ${formatNum(st.targetValue, st.metricUnit)}${reached ? ' ✓ REACHED' : ''}`)}`,
+          width
+        )
+      );
     }
 
     // Progress secondary metrics — with "Metrics:" label for consistency
@@ -151,11 +129,11 @@ export function renderDashboardLines(
         const val = bestSecondary[sm.name];
         const bv = baselineSec[sm.name];
         if (val !== undefined) {
-          let part = th.fg("muted", `${sm.name}: ${formatNum(val, sm.unit)}`);
+          let part = th.fg('muted', `${sm.name}: ${formatNum(val, sm.unit)}`);
           if (bv !== undefined && bv !== 0 && val !== bv) {
             const p = ((val - bv) / bv) * 100;
-            const s = p > 0 ? "+" : "";
-            const c = val <= bv ? "success" : "error";
+            const s = p > 0 ? '+' : '';
+            const c = val <= bv ? 'success' : 'error';
             part += th.fg(c, ` ${s}${p.toFixed(1)}%`);
           }
           secParts.push(part);
@@ -164,22 +142,22 @@ export function renderDashboardLines(
 
       // Flow-wrap parts into lines with "Metrics:" label on first line
       if (secParts.length > 0) {
-        const metricsLabel = th.fg("muted", "Metrics:");
-        const tilde = th.fg("muted", "~");
+        const metricsLabel = th.fg('muted', 'Metrics:');
+        const tilde = th.fg('muted', '~');
         const prefix = `  ${metricsLabel}  ${tilde} `;
         const prefixWidth = visibleWidth(prefix);
         const maxLineW = width - prefixWidth;
 
-        let curLine = "";
+        let curLine = '';
         let curVisW = 0;
         let isFirstLine = true;
 
         for (const part of secParts) {
           const partVisW = visibleWidth(part);
-          const sep = curLine ? "  " : "";
+          const sep = curLine ? '  ' : '';
 
           if (curLine && curVisW + sep.length + partVisW > maxLineW) {
-            const linePrefix = isFirstLine ? prefix : " ".repeat(prefixWidth);
+            const linePrefix = isFirstLine ? prefix : ' '.repeat(prefixWidth);
             lines.push(truncateToWidth(`${linePrefix}${curLine}`, width));
             curLine = part;
             curVisW = partVisW;
@@ -190,7 +168,7 @@ export function renderDashboardLines(
           }
         }
         if (curLine) {
-          const linePrefix = isFirstLine ? prefix : " ".repeat(prefixWidth);
+          const linePrefix = isFirstLine ? prefix : ' '.repeat(prefixWidth);
           lines.push(truncateToWidth(`${linePrefix}${curLine}`, width));
         }
       }
@@ -199,19 +177,13 @@ export function renderDashboardLines(
 
   // Chart visualization - only in fullscreen mode (maxRows === 0)
   if (maxRows === 0 && st.results.length > 0) {
-    lines.push("");
-    lines.push(th.fg("muted", "  Chart:"));
-    const chartLines = renderScatterPlot(
-      st.results,
-      st.currentSegment,
-      st.metricUnit,
-      width,
-      th
-    );
+    lines.push('');
+    lines.push(th.fg('muted', '  Chart:'));
+    const chartLines = renderScatterPlot(st.results, st.metricUnit, width, th);
     lines.push(...chartLines);
   }
 
-  lines.push("");
+  lines.push('');
 
   // Determine visible rows for column sizing
   const effectiveMax = maxRows <= 0 ? st.results.length : maxRows;
@@ -233,7 +205,10 @@ export function renderDashboardLines(
 
   // Calculate content widths by scanning visible rows
   function contentWidth(values: (string | undefined)[], header: string): number {
-    const maxContent = Math.max(header.length, ...values.filter(Boolean).map((v) => visibleWidth(v!)));
+    const maxContent = Math.max(
+      header.length,
+      ...values.filter(Boolean).map((v) => visibleWidth(v!))
+    );
     return maxContent;
   }
 
@@ -242,10 +217,10 @@ export function renderDashboardLines(
   const primaryValues = visibleRows.map((r) => formatNum(r.metric, st.metricUnit));
   const statuses = visibleRows.map((r) => r.status);
 
-  const idxW = contentWidth(rowIndices, "#");
-  const commitW = contentWidth(commits, "commit");
-  const primaryW = contentWidth(primaryValues, "★ " + st.metricName);
-  const statusW = contentWidth(statuses, "status");
+  const idxW = contentWidth(rowIndices, '#');
+  const commitW = contentWidth(commits, 'commit');
+  const primaryW = contentWidth(primaryValues, '★ ' + st.metricName);
+  const statusW = contentWidth(statuses, 'status');
 
   // Calculate secondary metric content widths
   const secWidths = secMetrics.map((sm) => {
@@ -285,7 +260,8 @@ export function renderDashboardLines(
     // Check if this secondary metric fits
     // Must reserve: accumulated secondaries + this one + ellipsis (5 chars if any would be hidden) + min description
     const wouldHaveHidden = finalSecWidths.length > i + 1;
-    const neededWidth = fixedColsW + accumulatedSecW + secW + (wouldHaveHidden ? 5 : 0) + minDescWidth;
+    const neededWidth =
+      fixedColsW + accumulatedSecW + secW + (wouldHaveHidden ? 5 : 0) + minDescWidth;
     if (neededWidth < width) {
       visibleSecCount++;
       accumulatedSecW += secW;
@@ -298,7 +274,10 @@ export function renderDashboardLines(
   const ellipsisW = visibleSecCount < finalSecWidths.length ? minGap + 3 : 0; // 5 for "...  " (3 dots + 2 space gap)
 
   // Calculate description width (respecting max 25%, min 25 chars)
-  const descW = Math.max(minDescWidth, Math.min(descMaxW, width - fixedColsW - accumulatedSecW - ellipsisW));
+  const descW = Math.max(
+    minDescWidth,
+    Math.min(descMaxW, width - fixedColsW - accumulatedSecW - ellipsisW)
+  );
 
   // Final column config
   const col = {
@@ -318,48 +297,40 @@ export function renderDashboardLines(
     const visW = visibleWidth(s);
     if (visW <= contentW) return s.padEnd(colW);
     // Need to truncate - reserve 3 chars for "..."
-    return truncateToWidth(s, contentW - 3) + "...";
+    return truncateToWidth(s, contentW - 3) + '...';
   };
 
   // Table header
   let headerLine =
-    `  ${th.fg("muted", fit("#", col.idx))}` +
-    `${th.fg("muted", fit("commit", col.commit))}` +
-    `${th.fg("warning", th.bold(fit("★ " + st.metricName, col.primary)))}`;
+    `  ${th.fg('muted', fit('#', col.idx))}` +
+    `${th.fg('muted', fit('commit', col.commit))}` +
+    `${th.fg('warning', th.bold(fit('★ ' + st.metricName, col.primary)))}`;
 
   for (let i = 0; i < visibleSecMetrics.length; i++) {
     const sm = visibleSecMetrics[i];
     const w = visibleSecWidths[i].width;
     // Truncate secondary metric names if needed
-    headerLine += th.fg("muted", truncateToWidth(sm.name, w - minGap).padEnd(w));
+    headerLine += th.fg('muted', truncateToWidth(sm.name, w - minGap).padEnd(w));
   }
 
   if (ellipsisW > 0) {
-    headerLine += th.fg("dim", "...".padEnd(ellipsisW));
+    headerLine += th.fg('dim', '...'.padEnd(ellipsisW));
   }
 
-  headerLine +=
-    `${th.fg("muted", fit("status", col.status))}` +
-    `${th.fg("muted", "description")}`;
+  headerLine += `${th.fg('muted', fit('status', col.status))}` + `${th.fg('muted', 'description')}`;
 
   lines.push(truncateToWidth(headerLine, width));
-  lines.push(
-    truncateToWidth(`  ${th.fg("borderMuted", "─".repeat(width - 4))}`, width)
-  );
+  lines.push(truncateToWidth(`  ${th.fg('borderMuted', '─'.repeat(width - 4))}`, width));
 
-  // Baseline values for delta display (current segment only)
-  const baselinePrimary = findBaselineMetric(st.results, st.currentSegment);
-  const baselineSecondary = findBaselineSecondary(
-    st.results,
-    st.currentSegment,
-    st.secondaryMetrics
-  );
+  // Baseline values for delta display
+  const baselinePrimary = st.results.length > 0 ? st.results[0].metric : null;
+  const baselineSecondary = st.results.length > 0 ? (st.results[0].metrics ?? {}) : {};
 
   // Show max 6 recent runs, with a note about hidden earlier ones
   if (startIdx > 0) {
     lines.push(
       truncateToWidth(
-        `  ${th.fg("dim", `… ${startIdx} earlier run${startIdx === 1 ? "" : "s"}`)}`,
+        `  ${th.fg('dim', `… ${startIdx} earlier run${startIdx === 1 ? '' : 's'}`)}`,
         width
       )
     );
@@ -367,54 +338,43 @@ export function renderDashboardLines(
 
   for (let i = startIdx; i < st.results.length; i++) {
     const r = st.results[i];
-    const isOld = r.segment !== st.currentSegment;
-    const isBaseline =
-      !isOld && i === st.results.findIndex((x) => x.segment === st.currentSegment);
+    const isBaseline = i === 0;
 
-    const color = isOld
-      ? "dim"
-      : r.status === "keep"
-        ? "success"
-        : r.status === "crash" || r.status === "checks_failed"
-          ? "error"
-          : "warning";
+    const color =
+      r.status === 'keep'
+        ? 'success'
+        : r.status === 'crash' || r.status === 'checks_failed'
+          ? 'error'
+          : 'warning';
 
     // Primary metric with color coding
     const primaryStr = formatNum(r.metric, st.metricUnit);
-    let primaryColor: Parameters<typeof th.fg>[0] = isOld ? "dim" : "text";
-    if (!isOld) {
-      if (isBaseline) {
-        primaryColor = "text";
-      } else if (
-        baselinePrimary !== null &&
-        r.status === "keep" &&
-        r.metric > 0
-      ) {
-        if (isBetter(r.metric, baselinePrimary, st.bestDirection)) {
-          primaryColor = "success";
-        } else if (r.metric !== baselinePrimary) {
-          primaryColor = "error";
-        }
+    let primaryColor: Parameters<typeof th.fg>[0] = 'text';
+    if (isBaseline) {
+      primaryColor = 'text';
+    } else if (baselinePrimary !== null && r.status === 'keep' && r.metric > 0) {
+      if (isBetter(r.metric, baselinePrimary, st.bestDirection)) {
+        primaryColor = 'success';
+      } else if (r.metric !== baselinePrimary) {
+        primaryColor = 'error';
       }
     }
 
-    const idxStr = th.fg("dim", String(i + 1).padEnd(col.idx));
+    const idxStr = th.fg('dim', String(i + 1).padEnd(col.idx));
 
-    // Commit column: show "(old)", "—", or the commit hash
-    let commitDisplay = "";
-    if (isOld) {
-      commitDisplay = "(old)";
-    } else if (r.status !== "keep") {
-      commitDisplay = "—";
+    // Commit column: show "—" for non-kept, or the commit hash
+    let commitDisplay = '';
+    if (r.status !== 'keep') {
+      commitDisplay = '—';
     } else {
       commitDisplay = r.commit;
     }
-    const commitStr = th.fg(isOld ? "dim" : "accent", fit(commitDisplay, col.commit));
+    const commitStr = th.fg('accent', fit(commitDisplay, col.commit));
 
     let rowLine =
       `  ${idxStr}` +
       `${commitStr}` +
-      `${th.fg(primaryColor, isOld ? fit(primaryStr, col.primary) : th.bold(fit(primaryStr, col.primary)))}`;
+      `${th.fg(primaryColor, th.bold(fit(primaryStr, col.primary)))}`;
 
     // Secondary metrics (only visible columns - show full values, no truncation)
     const rowMetrics = r.metrics ?? {};
@@ -424,31 +384,33 @@ export function renderDashboardLines(
       const val = rowMetrics[sm.name];
       if (val !== undefined) {
         const secStr = formatNum(val, sm.unit);
-        let secColor: Parameters<typeof th.fg>[0] = "dim";
-        if (!isOld) {
+        let secColor: Parameters<typeof th.fg>[0] = 'text';
+        if (isBaseline) {
+          secColor = 'text';
+        } else {
           const bv = baselineSecondary[sm.name];
-          if (isBaseline) {
-            secColor = "text";
-          } else if (bv !== undefined && bv !== 0) {
-            secColor = val <= bv ? "success" : "error";
+          if (bv !== undefined && bv !== 0) {
+            secColor = val <= bv ? 'success' : 'error';
           }
         }
         // Truncate if needed
         rowLine += th.fg(secColor, truncateToWidth(secStr, w - minGap).padEnd(w));
       } else {
-        rowLine += th.fg("dim", "—".padEnd(w));
+        rowLine += th.fg('dim', '—'.padEnd(w));
       }
     }
 
     // Ellipsis column if metrics were truncated
     if (ellipsisW > 0) {
-      const hasHiddenMetrics = secMetrics.slice(visibleSecCount).some((sm) => rowMetrics[sm.name] !== undefined);
-      rowLine += th.fg("dim", hasHiddenMetrics ? "...".padEnd(ellipsisW) : " ".repeat(ellipsisW));
+      const hasHiddenMetrics = secMetrics
+        .slice(visibleSecCount)
+        .some((sm) => rowMetrics[sm.name] !== undefined);
+      rowLine += th.fg('dim', hasHiddenMetrics ? '...'.padEnd(ellipsisW) : ' '.repeat(ellipsisW));
     }
 
     rowLine +=
       `${th.fg(color, fit(r.status, col.status))}` +
-      `${th.fg("muted", r.description.slice(0, col.desc))}`;
+      `${th.fg('muted', r.description.slice(0, col.desc))}`;
 
     lines.push(truncateToWidth(rowLine, width));
   }
