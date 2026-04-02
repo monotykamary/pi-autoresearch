@@ -3,7 +3,7 @@
  */
 
 // Formatting utilities
-export { commas, fmtNum, formatNum, formatSize, formatElapsed } from './format.js';
+export { commas, fmtNum, formatNum, formatElapsed } from './format.js';
 
 // Parsing utilities
 export { parseMetricLines, inferUnit } from './parse.js';
@@ -18,9 +18,4 @@ export { killTree, createTempFileAllocator } from './process.js';
 export { sortedMedian, isBetter, computeConfidence } from './stats.js';
 
 // Experiment state helpers (segment-based filtering - kept for internal use)
-export {
-  currentResults,
-  findBaselineMetric,
-  findBaselineRunNumber,
-  findBaselineSecondary,
-} from './experiment.js';
+export { currentResults, findBaselineMetric, findBaselineSecondary } from './experiment.js';

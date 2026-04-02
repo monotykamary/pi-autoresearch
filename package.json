@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
+    "lint:dead": "knip --no-gitignore",
     "postinstall": "simple-git-hooks"
   },
   "pi": {
@@ -36,6 +37,7 @@
     "@commitlint/config-conventional": "^20.5.0",
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.1.2",
+    "knip": "^6.2.0",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
     "simple-git-hooks": "^2.13.1",
