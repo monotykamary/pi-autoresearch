@@ -190,34 +190,11 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
 
   const reconstructState = createStateReconstructor(ctx);
 
-  // Session events - only on switch/fork/tree (existing sessions), not on new
-  pi.on('session_switch', async (_e, extCtx) => {
-    // Auto-detect worktree for existing sessions
-    const runtime = getRuntime(extCtx);
-    if (!runtime.worktreeDir) {
-      const { detectAutoresearchWorktree } = await import('../git/index.js');
-      const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
-      if (detected) {
-        runtime.worktreeDir = detected;
-      }
-    }
-    await reconstructState(extCtx);
-    startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget);
-  });
-  pi.on('session_fork', async (_e, extCtx) => {
-    // Auto-detect worktree for existing sessions
-    const runtime = getRuntime(extCtx);
-    if (!runtime.worktreeDir) {
-      const { detectAutoresearchWorktree } = await import('../git/index.js');
-      const detected = detectAutoresearchWorktree(extCtx.cwd, getSessionKey(extCtx));
-      if (detected) {
-        runtime.worktreeDir = detected;
-      }
-    }
-    await reconstructState(extCtx);
-    startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget);
-  });
-  pi.on('session_tree', async (_e, extCtx) => {
+  // Session events - use session_start with reason instead of deprecated session_switch/session_fork
+  pi.on('session_start', async (event, extCtx) => {
+    // Only handle new, resume, and fork reasons (existing sessions)
+    if (event.reason === 'startup' || event.reason === 'reload') return;
+
     // Auto-detect worktree for existing sessions
     const runtime = getRuntime(extCtx);
     if (!runtime.worktreeDir) {
