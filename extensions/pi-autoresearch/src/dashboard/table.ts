@@ -405,7 +405,7 @@ export function renderDashboardLines(
 
     rowLine +=
       `${th.fg(color, fit(r.status, col.status))}` +
-      `${th.fg('muted', fit(r.description, col.desc))}`;
+      `${th.fg('muted', r.description.slice(0, col.desc - 4))}`;
 
     lines.push(truncateToWidth(rowLine, width));
   }
