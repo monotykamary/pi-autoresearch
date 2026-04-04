@@ -197,10 +197,8 @@ export function renderDashboardLines(
 
   // === SMART COLUMN WIDTH CALCULATION ===
   // Priority: idx, commit, primary, [secondary metrics...], status, description
-  // Description gets max 25% of width. Other columns get content-based width,
-  // capped at width / totalColumns. Truncated metrics show "..." column.
+  // Description uses remaining space when no secondaries, else capped at 25%
 
-  const descMaxW = Math.floor(width * 0.25);
   const minGap = 2; // minimum spaces between columns
 
   // Calculate content widths by scanning visible rows
@@ -250,10 +248,10 @@ export function renderDashboardLines(
   const fixedColsW = cappedIdxW + cappedCommitW + cappedPrimaryW + cappedStatusW;
 
   // Calculate how many secondary metrics actually fit
-  // Each secondary metric uses its FULL content width
+  // Reserve at least 25% of width or 25 chars for description (whichever is larger)
   let visibleSecCount = 0;
   let accumulatedSecW = 0;
-  const minDescWidth = 25; // Minimum meaningful description width
+  const minDescWidth = Math.max(25, Math.floor(width * 0.25));
 
   for (let i = 0; i < finalSecWidths.length; i++) {
     const secW = finalSecWidths[i].width;
@@ -273,11 +271,8 @@ export function renderDashboardLines(
   // Show ellipsis column if there are hidden secondary metrics
   const ellipsisW = visibleSecCount < finalSecWidths.length ? minGap + 3 : 0; // 5 for "...  " (3 dots + 2 space gap)
 
-  // Calculate description width (respecting max 25%, min 25 chars)
-  const descW = Math.max(
-    minDescWidth,
-    Math.min(descMaxW, width - fixedColsW - accumulatedSecW - ellipsisW)
-  );
+  // Description uses all remaining width (minimum enforced by secondary fitting logic above)
+  const descW = width - fixedColsW - accumulatedSecW - ellipsisW;
 
   // Final column config
   const col = {
