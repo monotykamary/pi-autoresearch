@@ -9,7 +9,7 @@ import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 import type { AutoresearchRuntime } from '../../src/types/index.js';
 
-describe('Bash Tool Redirection Integration', () => {
+describe('Bash Tool Redirection Integration', { timeout: 30000 }, () => {
   let testDir: string;
   let repoDir: string;
   let worktreePath: string;

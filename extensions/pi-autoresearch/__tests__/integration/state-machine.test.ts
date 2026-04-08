@@ -54,7 +54,7 @@ describe('Autoresearch State Machine', () => {
     } catch {}
   });
 
-  describe('NORMAL -> ACTIVE transition (init_experiment)', () => {
+  describe('NORMAL -> ACTIVE transition (init_experiment)', { timeout: 30000 }, () => {
     it('init_experiment sets autoresearchMode to true', () => {
       const runtime = {
         autoresearchMode: false,

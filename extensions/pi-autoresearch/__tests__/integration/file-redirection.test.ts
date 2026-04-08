@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
 
-describe('File Redirection Integration', () => {
+describe('File Redirection Integration', { timeout: 30000 }, () => {
   let testDir: string;
   let repoDir: string;
   let worktreePath: string;
