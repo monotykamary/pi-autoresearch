@@ -14,15 +14,16 @@
  * - Injects autoresearch.md into context on every turn via before_agent_start
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { AutoresearchRuntime } from "./src/types/index.js";
-import { createRuntimeStore } from "./src/state/index.js";
+import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { AutoresearchRuntime } from './src/types/index.js';
+import { createRuntimeStore } from './src/state/index.js';
 import {
   registerInitExperiment,
   registerRunExperiment,
   registerLogExperiment,
   registerRedirectedFileTools,
-} from "./src/tools/index.js";
+  registerRedirectedBashTool,
+} from './src/tools/index.js';
 import {
   createWidgetUpdater,
   clearSessionUi,
@@ -30,12 +31,9 @@ import {
   createFullscreenState,
   clearFullscreen,
   type FullscreenState,
-} from "./src/ui/index.js";
-import {
-  registerLifecycleHandlers,
-  createPromptExtender,
-} from "./src/lifecycle/index.js";
-import { registerAutoresearchCommand } from "./src/command.js";
+} from './src/ui/index.js';
+import { registerLifecycleHandlers, createPromptExtender } from './src/lifecycle/index.js';
+import { registerAutoresearchCommand } from './src/command.js';
 
 // ---------------------------------------------------------------------------
 // Extension
@@ -68,10 +66,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
   // Register system prompt extension for autoresearch mode
   const extendPrompt = createPromptExtender({ getRuntime });
-  pi.on("before_agent_start", async (event, ctx) => extendPrompt(event, ctx));
+  pi.on('before_agent_start', async (event, ctx) => extendPrompt(event, ctx));
 
   // Register tools
   registerRedirectedFileTools(pi, getRuntime);
+  registerRedirectedBashTool(pi, getRuntime);
   registerInitExperiment(pi, { pi, getRuntime, getSessionKey, startWatcher });
   registerRunExperiment(pi, {
     pi,
@@ -82,8 +81,8 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   registerLogExperiment(pi, { pi, getRuntime });
 
   // Register keyboard shortcuts
-  pi.registerShortcut("ctrl+x", {
-    description: "Toggle autoresearch dashboard",
+  pi.registerShortcut('ctrl+x', {
+    description: 'Toggle autoresearch dashboard',
     handler: async (ctx) => {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
@@ -91,17 +90,19 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       if (state.results.length === 0) {
         if (!runtime.autoresearchMode) {
           // Check if autoresearch.md exists to give better message
-          const { resolveWorkDir } = await import("./src/git/index.js");
+          const { resolveWorkDir } = await import('./src/git/index.js');
           const workDir = resolveWorkDir(ctx.cwd, runtime);
-          const fs = await import("node:fs");
-          const path = await import("node:path");
-          const hasRules = fs.existsSync(path.join(workDir, "autoresearch.md"));
+          const fs = await import('node:fs');
+          const path = await import('node:path');
+          const hasRules = fs.existsSync(path.join(workDir, 'autoresearch.md'));
           ctx.ui.notify(
-            hasRules ? "No experiments yet" : "No experiments yet — run /autoresearch to get started",
-            "info"
+            hasRules
+              ? 'No experiments yet'
+              : 'No experiments yet — run /autoresearch to get started',
+            'info'
           );
         } else {
-          ctx.ui.notify("No experiments yet", "info");
+          ctx.ui.notify('No experiments yet', 'info');
         }
         return;
       }
@@ -112,8 +113,8 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   });
 
   const showFullscreen = createFullscreenHandler(uiState, { getRuntime });
-  pi.registerShortcut("ctrl+shift+x", {
-    description: "Fullscreen autoresearch dashboard",
+  pi.registerShortcut('ctrl+shift+x', {
+    description: 'Fullscreen autoresearch dashboard',
     handler: showFullscreen,
   });
 
