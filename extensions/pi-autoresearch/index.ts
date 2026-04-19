@@ -124,6 +124,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     getRuntime,
     getSessionKey,
     updateWidget,
+    clearSessionUi: (ctx) => clearSessionUi(ctx, clearOverlay),
     reconstructState,
     startWatcher,
   });
