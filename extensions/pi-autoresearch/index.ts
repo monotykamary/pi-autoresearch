@@ -81,7 +81,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   registerLogExperiment(pi, { pi, getRuntime });
 
   // Register keyboard shortcuts
-  pi.registerShortcut('ctrl+x', {
+  pi.registerShortcut('ctrl+shift+a', {
     description: 'Toggle autoresearch dashboard',
     handler: async (ctx) => {
       const runtime = getRuntime(ctx);
