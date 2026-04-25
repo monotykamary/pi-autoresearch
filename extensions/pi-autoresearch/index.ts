@@ -12,6 +12,12 @@
  * - Ctrl+X toggle to expand/collapse full dashboard inline above the editor
  * - Adds autoresearch guidance to the system prompt and points the agent at autoresearch.md
  * - Injects autoresearch.md into context on every turn via before_agent_start
+ *
+ * Tool activation:
+ * The 3 experiment tools are registered but hidden from the model by default
+ * (excluded from the active tool set). They only appear when autoresearch mode
+ * is activated via `/autoresearch` or `init_experiment`, and are removed when
+ * the loop ends or is stopped. This prevents models from calling them unprompted.
  */
 
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -68,7 +74,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   const extendPrompt = createPromptExtender({ getRuntime });
   pi.on('before_agent_start', async (event, ctx) => extendPrompt(event, ctx));
 
-  // Register tools
+  // Register tools (all tools are registered but experiment tools start inactive)
   registerRedirectedFileTools(pi, getRuntime);
   registerRedirectedBashTool(pi, getRuntime);
   registerInitExperiment(pi, { pi, getRuntime, getSessionKey, startWatcher });

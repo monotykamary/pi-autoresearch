@@ -14,6 +14,7 @@ import {
 import { computeConfidence } from '../utils/stats.js';
 import { resolveWorkDir } from '../git/index.js';
 import { BENCHMARK_GUARDRAIL, MAX_AUTORESUME_TURNS } from '../constants.js';
+import { deactivateAutoresearchTools, activateAutoresearchTools } from '../tools/activation.js';
 
 /** Dependencies needed by lifecycle handlers */
 export interface LifecycleContext {
@@ -191,6 +192,12 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
   const reconstructState = createStateReconstructor(ctx);
 
   // Session events - use session_start with reason instead of deprecated session_switch/session_fork
+  // First: always ensure experiment tools start hidden (runs for ALL session start reasons)
+  pi.on('session_start', async (_event, _extCtx) => {
+    deactivateAutoresearchTools(pi);
+  });
+
+  // Then: for resumed/forked sessions with existing experiment data, re-activate tools
   pi.on('session_start', async (event, extCtx) => {
     // Only handle new, resume, and fork reasons (existing sessions)
     if (event.reason === 'startup' || event.reason === 'reload') return;
@@ -206,6 +213,12 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
     }
     await reconstructState(extCtx);
     startJsonlWatcher(extCtx, getRuntime, reconstructState, updateWidget);
+
+    // If session has existing experiment data, activate tools so the agent
+    // can resume the loop (call init_experiment to re-enter autoresearch mode)
+    if (runtime.state.results.length > 0) {
+      activateAutoresearchTools(pi);
+    }
   });
 
   // Clear UI when starting a new session via /new - before the switch happens
@@ -245,6 +258,8 @@ export function registerLifecycleHandlers(ctx: LifecycleContext): {
 
     // Turn off autoresearchMode when agent legitimately stops (not mid-experiment)
     // This disables file redirection until init_experiment is called again
+    // Note: we keep the experiment tools active so the model can call init_experiment
+    // to resume (Ctrl+C, context limit, etc. are interrupts, not opt-outs)
     runtime.autoresearchMode = false;
     extCtx.ui.notify(
       'Autoresearch mode paused — file redirection disabled. Call init_experiment to resume.',

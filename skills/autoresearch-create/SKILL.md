@@ -20,6 +20,8 @@ For quick wins — one-shot fixes, lint/type feedback under 1s, or trivial chang
 
 ## Tools
 
+The experiment tools (`init_experiment`, `run_experiment`, `log_experiment`) are **hidden by default** and only appear when autoresearch mode is activated via `/autoresearch`. This prevents the model from calling them unprompted. Once active, the tools stay available until the loop ends or is explicitly stopped.
+
 - **`init_experiment`** — configure session (name, metric, unit, direction, target_value). Call again to re-initialize with a new baseline when the optimization target changes.
 - **`run_experiment`** — runs command, times it, captures output.
 - **`log_experiment`** — records result. `keep` auto-commits. `discard`/`crash`/`checks_failed` auto-reverts code changes (autoresearch files preserved). Always include secondary `metrics` dict. Dashboard: ctrl+shift+a.

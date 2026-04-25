@@ -15,6 +15,7 @@ import {
   getDisplayWorktreePath,
 } from '../git/index.js';
 import { resetForReinit } from '../state/index.js';
+import { activateAutoresearchTools } from './activation.js';
 
 interface InitToolContext {
   pi: ExtensionAPI;
@@ -121,6 +122,7 @@ export function registerInitExperiment(pi: ExtensionAPI, ctx: InitToolContext) {
       }
 
       runtime.autoresearchMode = true;
+      activateAutoresearchTools(pi);
 
       // Start watcher if not already running and we have a worktree
       if (ctx.startWatcher && runtime.worktreeDir && !runtime.jsonlWatcher) {

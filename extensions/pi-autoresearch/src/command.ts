@@ -15,6 +15,7 @@ import {
 } from './git/index.js';
 import { createExperimentState } from './state/index.js';
 import { BENCHMARK_GUARDRAIL } from './constants.js';
+import { activateAutoresearchTools, deactivateAutoresearchTools } from './tools/activation.js';
 
 /** Dependencies needed by command handler */
 export interface CommandContext {
@@ -65,6 +66,7 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
       if (command === 'off') {
         // Turn off autoresearch mode and clear stale UI state
         runtime.autoresearchMode = false;
+        deactivateAutoresearchTools(pi);
         runtime.dashboardExpanded = false;
         runtime.lastAutoResumeTime = 0;
         runtime.autoResumeTurns = 0;
@@ -105,6 +107,7 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
         }
 
         runtime.autoresearchMode = false;
+        deactivateAutoresearchTools(pi);
         runtime.dashboardExpanded = false;
         runtime.lastAutoResumeTime = 0;
         runtime.autoResumeTurns = 0;
@@ -140,6 +143,7 @@ export function registerAutoresearchCommand(ctx: CommandContext): void {
       }
 
       runtime.autoresearchMode = true;
+      activateAutoresearchTools(pi);
       runtime.autoResumeTurns = 0;
 
       // Try to detect existing worktree first (only for current session)

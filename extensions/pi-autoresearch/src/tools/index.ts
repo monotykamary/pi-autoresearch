@@ -8,3 +8,9 @@ export { registerLogExperiment } from './log-experiment.js';
 export { registerRedirectedFileTools } from './file-redirect.js';
 export { registerRedirectedBashTool } from './bash-redirect.js';
 export { InitParams, RunParams, LogParams } from './schemas.js';
+export {
+  activateAutoresearchTools,
+  deactivateAutoresearchTools,
+  excludeAutoresearchToolsFromDefaults,
+  AUTORESEARCH_TOOL_NAMES,
+} from './activation.js';

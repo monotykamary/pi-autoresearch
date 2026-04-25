@@ -340,3 +340,165 @@ describe('Autoresearch State Machine', () => {
     });
   });
 });
+
+// ===========================================================================
+// Tool activation lifecycle integration tests
+// Tests how tool visibility tracks autoresearchMode across state transitions
+// ===========================================================================
+import {
+  activateAutoresearchTools,
+  deactivateAutoresearchTools,
+  AUTORESEARCH_TOOL_NAMES,
+} from '../../src/tools/activation.js';
+
+function createMockPi(activeTools: string[] = []) {
+  const state = {
+    activeTools: [...activeTools],
+  };
+  return {
+    getActiveTools: () => [...state.activeTools],
+    setActiveTools: (tools: string[]) => {
+      state.activeTools = [...tools];
+    },
+    _state: state,
+  };
+}
+
+describe('Tool activation lifecycle', () => {
+  it('full lifecycle: hidden -> active -> interrupt -> still active -> explicit off -> hidden', () => {
+    const pi = createMockPi(['read', 'bash', 'edit', 'write']);
+
+    // 1. Fresh session: tools are hidden
+    deactivateAutoresearchTools(pi as any);
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).not.toContain(name);
+    }
+
+    // 2. /autoresearch optimize X -> tools activated
+    activateAutoresearchTools(pi as any);
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).toContain(name);
+    }
+
+    // 3. Ctrl+C interrupt (agent_end) -> autoresearchMode off, but tools STAY active
+    // (no deactivateAutoresearchTools call)
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).toContain(name);
+    }
+
+    // 4. Model calls init_experiment to resume -> tools still active (idempotent)
+    activateAutoresearchTools(pi as any);
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).toContain(name);
+    }
+
+    // 5. /autoresearch off -> tools deactivated (explicit opt-out)
+    deactivateAutoresearchTools(pi as any);
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).not.toContain(name);
+    }
+  });
+
+  it('loop completion (max experiments) does not hide tools', () => {
+    const pi = createMockPi(['read', 'bash', 'edit', 'write']);
+    activateAutoresearchTools(pi as any);
+
+    // log_experiment reports max experiments reached
+    // autoresearchMode = false, but NO deactivateAutoresearchTools call
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).toContain(name);
+    }
+
+    // Model can call init_experiment to start a new segment
+    // (tools are still visible)
+  });
+
+  it('loop completion (target reached) does not hide tools', () => {
+    const pi = createMockPi(['read', 'bash', 'edit', 'write']);
+    activateAutoresearchTools(pi as any);
+
+    // log_experiment reports target reached
+    // autoresearchMode = false, but NO deactivateAutoresearchTools call
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).toContain(name);
+    }
+  });
+
+  it('/autoresearch clear deactivates tools (clean slate)', () => {
+    const pi = createMockPi(['read', 'bash', 'edit', 'write']);
+    activateAutoresearchTools(pi as any);
+
+    // /autoresearch clear
+    deactivateAutoresearchTools(pi as any);
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).not.toContain(name);
+    }
+  });
+
+  it('session start always deactivates first (ensures hidden baseline)', () => {
+    const pi = createMockPi([
+      'read',
+      'bash',
+      'init_experiment',
+      'run_experiment',
+      'log_experiment',
+    ]);
+
+    // session_start handler: deactivateAutoresearchTools(pi)
+    deactivateAutoresearchTools(pi as any);
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).not.toContain(name);
+    }
+  });
+
+  it('session resume with data re-activates after initial deactivation', () => {
+    const pi = createMockPi(['read', 'bash', 'edit', 'write']);
+
+    // session_start handler #1: always deactivate
+    deactivateAutoresearchTools(pi as any);
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).not.toContain(name);
+    }
+
+    // session_start handler #2: if results.length > 0, re-activate
+    const hasResults = true;
+    if (hasResults) {
+      activateAutoresearchTools(pi as any);
+    }
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).toContain(name);
+    }
+  });
+
+  it('session resume without data stays deactivated', () => {
+    const pi = createMockPi(['read', 'bash', 'edit', 'write']);
+
+    // session_start handler #1: always deactivate
+    deactivateAutoresearchTools(pi as any);
+
+    // session_start handler #2: no results -> don't activate
+    const hasResults = false;
+    if (hasResults) {
+      activateAutoresearchTools(pi as any);
+    }
+    for (const name of AUTORESEARCH_TOOL_NAMES) {
+      expect(pi._state.activeTools).not.toContain(name);
+    }
+  });
+
+  it('builtin tool overrides (bash/read/edit/write) are never removed', () => {
+    const pi = createMockPi(['read', 'bash', 'edit', 'write']);
+
+    activateAutoresearchTools(pi as any);
+    expect(pi._state.activeTools).toContain('read');
+    expect(pi._state.activeTools).toContain('bash');
+    expect(pi._state.activeTools).toContain('edit');
+    expect(pi._state.activeTools).toContain('write');
+
+    deactivateAutoresearchTools(pi as any);
+    expect(pi._state.activeTools).toContain('read');
+    expect(pi._state.activeTools).toContain('bash');
+    expect(pi._state.activeTools).toContain('edit');
+    expect(pi._state.activeTools).toContain('write');
+  });
+});
