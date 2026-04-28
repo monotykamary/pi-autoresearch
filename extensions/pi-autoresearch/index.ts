@@ -5,19 +5,22 @@
  * All experiment interactions happen through the `pi-autoresearch` CLI,
  * which dispatches to a long-lived harness server holding experiment state.
  *
- * This extension only:
+ * This extension:
  *   - Installs the CLI shell alias on session start
  *   - Starts/stops the harness server
  *   - Manages the status widget and fullscreen dashboard
- *   - Provides the /autoresearch command
+ *   - Provides the /autoresearch command (including live export)
+ *   - Auto-resumes the experiment loop after pi context compaction
+ *   - Injects autoresearch guidance into the system prompt
  *   - Writes session ID to disk for the harness server
  */
 
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Text, truncateToWidth } from '@mariozechner/pi-tui';
 import type {
@@ -38,6 +41,22 @@ import {
 import { renderDashboardLines } from './src/dashboard/index.js';
 import { formatNum, isBetter, currentResults, findBaselineSecondary } from './src/utils/index.js';
 import { getDisplayWorktreePath } from './src/git/index.js';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const MAX_AUTORESUME_TURNS = 20;
+const SETTLED_WINDOW_MS = 800;
+const BENCHMARK_GUARDRAIL =
+  'Be careful not to overfit to the benchmarks and do not cheat on the benchmarks.';
+
+// Session file paths (single source of truth for autoresearch.* filenames)
+const autoresearchJsonlPath = (dir: string) => join(dir, 'autoresearch.jsonl');
+const autoresearchMdPath = (dir: string) => join(dir, 'autoresearch.md');
+const autoresearchIdeasPath = (dir: string) => join(dir, 'autoresearch.ideas.md');
+const autoresearchChecksPath = (dir: string) => join(dir, 'autoresearch.checks.sh');
+const autoresearchConfigPath = (dir: string) => join(dir, 'autoresearch.config.json');
 
 // ---------------------------------------------------------------------------
 // CLI path resolution
@@ -120,6 +139,35 @@ function createHarnessServer(): HarnessServerController {
   }
 
   return { start, stop };
+}
+
+// ---------------------------------------------------------------------------
+// Config helpers
+// ---------------------------------------------------------------------------
+
+interface AutoresearchConfig {
+  workingDir?: string;
+  maxIterations?: number;
+}
+
+/** Read autoresearch.config.json from the given directory */
+function readConfig(cwd: string): AutoresearchConfig {
+  try {
+    const configPath = autoresearchConfigPath(cwd);
+    if (!fs.existsSync(configPath)) return {};
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+/** Resolve the working directory for autoresearch operations */
+function resolveWorkDir(ctxCwd: string): string {
+  const config = readConfig(ctxCwd);
+  if (config.workingDir) {
+    return config.workingDir.startsWith('/') ? config.workingDir : join(ctxCwd, config.workingDir);
+  }
+  return ctxCwd;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +354,7 @@ function startJsonlWatcher(
   const runtime = getRuntime(extCtx);
   if (runtime.jsonlWatcher) return;
 
-  const workDir = runtime.worktreeDir ?? extCtx.cwd;
+  const workDir = runtime.worktreeDir ?? resolveWorkDir(extCtx.cwd);
   const jsonlPath = join(workDir, 'autoresearch.jsonl');
   if (!fs.existsSync(jsonlPath)) return;
 
@@ -390,14 +438,408 @@ function writeSessionId(ctx: ExtensionContext, dirs: { base: string }): void {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-compact resume pipeline
+// ---------------------------------------------------------------------------
+
+function hasPendingResume(runtime: AutoresearchRuntime): boolean {
+  return runtime.pendingResumeMessage !== null;
+}
+
+function pausePendingResume(runtime: AutoresearchRuntime): void {
+  if (!runtime.pendingResumeTimer) return;
+  clearTimeout(runtime.pendingResumeTimer);
+  runtime.pendingResumeTimer = null;
+}
+
+function cancelPendingResume(runtime: AutoresearchRuntime): void {
+  pausePendingResume(runtime);
+  runtime.pendingResumeMessage = null;
+}
+
+function isAgentSettled(ctx: ExtensionContext): boolean {
+  return ctx.isIdle() && !ctx.hasPendingMessages();
+}
+
+function sendPendingResumeIfReady(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  runtime: AutoresearchRuntime
+): void {
+  const message = runtime.pendingResumeMessage;
+  if (!message) return;
+  if (!runtime.autoresearchMode) {
+    cancelPendingResume(runtime);
+    return;
+  }
+  if (!isAgentSettled(ctx)) return;
+  if (hasReachedAutoResumeLimit(runtime)) {
+    cancelPendingResume(runtime);
+    notifyAutoResumeLimitReached(ctx);
+    return;
+  }
+
+  cancelPendingResume(runtime);
+  runtime.autoResumeTurns++;
+  pi.sendUserMessage(message);
+}
+
+function schedulePendingResume(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  runtime: AutoresearchRuntime,
+  message: string
+): void {
+  pausePendingResume(runtime);
+  runtime.pendingResumeMessage = message;
+  runtime.pendingResumeTimer = setTimeout(
+    () => sendPendingResumeIfReady(pi, ctx, runtime),
+    SETTLED_WINDOW_MS
+  );
+}
+
+function reschedulePendingResume(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  runtime: AutoresearchRuntime
+): void {
+  if (!hasPendingResume(runtime)) return;
+  schedulePendingResume(pi, ctx, runtime, runtime.pendingResumeMessage!);
+}
+
+function hasRunExperimentsThisSession(runtime: AutoresearchRuntime): boolean {
+  return runtime.experimentsThisSession > 0;
+}
+
+/** Strict gate: only resume after a turn if an experiment actually ran. */
+function shouldAutoResumeAfterTurn(runtime: AutoresearchRuntime): boolean {
+  return runtime.autoresearchMode && hasRunExperimentsThisSession(runtime);
+}
+
+/** Permissive gate: compaction itself is evidence the loop should continue. */
+function shouldAutoResumeAfterCompact(runtime: AutoresearchRuntime): boolean {
+  return runtime.autoresearchMode;
+}
+
+function hasReachedAutoResumeLimit(runtime: AutoresearchRuntime): boolean {
+  return runtime.autoResumeTurns >= MAX_AUTORESUME_TURNS;
+}
+
+function notifyAutoResumeLimitReached(ctx: ExtensionContext): void {
+  ctx.ui.notify(`Autoresearch auto-resume limit reached (${MAX_AUTORESUME_TURNS} turns)`, 'info');
+}
+
+function composeResumeMessage(ctx: ExtensionContext): string {
+  const workDir = resolveWorkDir(ctx.cwd);
+  const parts = [
+    'Autoresearch loop ended (likely context limit and auto-compaction).',
+    'Re-read the persisted autoresearch context before continuing: autoresearch.md (rules), the tail of autoresearch.jsonl (recent kept/discarded runs and ASI), and git log (commits map 1:1 to kept experiments).',
+  ];
+  if (fs.existsSync(autoresearchIdeasPath(workDir))) {
+    parts.push(
+      'Then check autoresearch.ideas.md for promising paths to explore and prune stale/tried ideas.'
+    );
+  }
+  parts.push('Resume the experiment loop with the next most promising hypothesis.');
+  parts.push(BENCHMARK_GUARDRAIL);
+  return parts.join(' ');
+}
+
+function ensurePendingResume(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gate: (runtime: AutoresearchRuntime) => boolean
+): void {
+  const runtime = getRuntimeFromCtx(ctx);
+  if (hasPendingResume(runtime)) {
+    reschedulePendingResume(pi, ctx, runtime);
+    return;
+  }
+  if (!gate(runtime)) return;
+  if (hasReachedAutoResumeLimit(runtime)) {
+    notifyAutoResumeLimitReached(ctx);
+    return;
+  }
+  schedulePendingResume(pi, ctx, runtime, composeResumeMessage(ctx));
+}
+
+/** Send a message immediately if idle, otherwise as a follow-up */
+function sendWhenReady(pi: ExtensionAPI, ctx: ExtensionContext, message: string): void {
+  if (ctx.isIdle()) {
+    pi.sendUserMessage(message);
+    return;
+  }
+  pi.sendUserMessage(message, { deliverAs: 'followUp' });
+}
+
+// ---------------------------------------------------------------------------
+// Live dashboard export (HTTP server + SSE)
+// ---------------------------------------------------------------------------
+
+const TITLE_PLACEHOLDER = '__AUTORESEARCH_TITLE__';
+const LOGO_PLACEHOLDER = '__AUTORESEARCH_LOGO__';
+
+let cachedPackageRoot: string | null = null;
+
+function packageRoot(): string {
+  if (cachedPackageRoot) return cachedPackageRoot;
+  const extensionDir = fs.realpathSync(join(__dirname));
+  cachedPackageRoot = join(extensionDir, '..', '..');
+  return cachedPackageRoot;
+}
+
+function templatePath(): string {
+  return join(packageRoot(), 'assets', 'template.html');
+}
+
+function readTemplate(): string {
+  return fs.readFileSync(templatePath(), 'utf-8');
+}
+
+let cachedLogoDataUrl: string | null = null;
+
+function logoDataUrl(): string {
+  if (cachedLogoDataUrl) return cachedLogoDataUrl;
+  const logoPath = join(packageRoot(), 'assets', 'logo.webp');
+  const bytes = fs.readFileSync(logoPath);
+  cachedLogoDataUrl = `data:image/webp;base64,${bytes.toString('base64')}`;
+  return cachedLogoDataUrl;
+}
+
+function readJsonlContent(workDir: string): string {
+  return fs.readFileSync(autoresearchJsonlPath(workDir), 'utf-8').trim();
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function injectDataIntoTemplate(template: string, title: string): string {
+  const escapedTitle = escapeHtml(title);
+  return template.replace(TITLE_PLACEHOLDER, () => escapedTitle);
+}
+
+let dashboardServer: Server | null = null;
+let dashboardServerPort: number | null = null;
+let dashboardServerWorkDir: string | null = null;
+let dashboardServerHtmlPath: string | null = null;
+const dashboardSseClients = new Set<ServerResponse>();
+
+function openInBrowser(url: string): void {
+  if (process.platform === 'win32') {
+    spawnChild('cmd', ['/c', 'start', '', url], {
+      detached: true,
+      shell: true,
+      stdio: 'ignore',
+    }).unref();
+    return;
+  }
+
+  const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  spawnChild(openCmd, [url], { detached: true, stdio: 'ignore' }).unref();
+}
+
+function stopDashboardServer(): void {
+  for (const client of dashboardSseClients) {
+    try {
+      client.end();
+    } catch {
+      /* ignore */
+    }
+  }
+  dashboardSseClients.clear();
+
+  if (dashboardServer) {
+    try {
+      dashboardServer.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  dashboardServer = null;
+  dashboardServerPort = null;
+  dashboardServerWorkDir = null;
+  dashboardServerHtmlPath = null;
+}
+
+function writeDashboardFile(workDir: string): string {
+  const jsonlContent = readJsonlContent(workDir);
+  // Extract session name from first config entry
+  let sessionName = 'Autoresearch';
+  for (const line of jsonlContent.split('\n').filter(Boolean)) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry && entry.type === 'config' && entry.name) {
+        sessionName = entry.name;
+        break;
+      }
+    } catch {}
+  }
+  const html = injectDataIntoTemplate(readTemplate(), sessionName).replace(
+    LOGO_PLACEHOLDER,
+    logoDataUrl()
+  );
+  const exportDir = fs.mkdtempSync(join(tmpdir(), 'pi-autoresearch-dashboard-'));
+  const dest = join(exportDir, 'index.html');
+  fs.writeFileSync(dest, html);
+  return dest;
+}
+
+const CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.jsonl': 'text/plain; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+};
+
+function resolveServedFile(workDir: string, requestPath: string): string | null {
+  if (requestPath === '/') return dashboardServerHtmlPath;
+  if (requestPath === '/autoresearch.jsonl') return autoresearchJsonlPath(workDir);
+  return null;
+}
+
+function registerSseClient(res: ServerResponse): void {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('retry: 1000\n\n');
+  dashboardSseClients.add(res);
+  res.on('close', () => dashboardSseClients.delete(res));
+}
+
+function startStaticServer(workDir: string, dashboardHtmlPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const resolvedWorkDir = workDir;
+    const resolvedDashboardHtmlPath = dashboardHtmlPath;
+
+    if (dashboardServer && dashboardServerWorkDir === resolvedWorkDir && dashboardServerPort) {
+      dashboardServerHtmlPath = resolvedDashboardHtmlPath;
+      resolve(dashboardServerPort);
+      return;
+    }
+
+    stopDashboardServer();
+    dashboardServerHtmlPath = resolvedDashboardHtmlPath;
+
+    const server = createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+
+      if (url.pathname === '/events') {
+        registerSseClient(res);
+        return;
+      }
+
+      const filePath = resolveServedFile(resolvedWorkDir, url.pathname);
+      if (!filePath) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+        const ext = filePath.slice(filePath.lastIndexOf('.'));
+        const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(data);
+      });
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('Failed to bind dashboard server'));
+        return;
+      }
+      dashboardServer = server;
+      dashboardServerPort = address.port;
+      dashboardServerWorkDir = resolvedWorkDir;
+      resolve(address.port);
+    });
+
+    server.on('error', reject);
+  });
+}
+
+async function exportDashboard(ctx: ExtensionContext): Promise<void> {
+  const workDir = resolveWorkDir(ctx.cwd);
+  const jsonlPath = autoresearchJsonlPath(workDir);
+
+  if (!fs.existsSync(jsonlPath)) {
+    ctx.ui.notify('No autoresearch.jsonl found — run some experiments first', 'error');
+    return;
+  }
+
+  try {
+    const dashboardHtmlPath = writeDashboardFile(workDir);
+    const port = await startStaticServer(workDir, dashboardHtmlPath);
+    const url = `http://127.0.0.1:${port}`;
+    openInBrowser(url);
+    ctx.ui.notify(`Dashboard at ${url} (live updates)`, 'info');
+  } catch (error) {
+    ctx.ui.notify(
+      `Export failed: ${error instanceof Error ? error.message : String(error)}`,
+      'error'
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /autoresearch command help
+// ---------------------------------------------------------------------------
+
+function autoresearchHelp(): string {
+  return [
+    'Usage: /autoresearch [off|clear|export|<text>]',
+    '',
+    'Commands:',
+    '  off     — Stop autoresearch mode (aborts current run)',
+    '  clear   — Delete autoresearch.jsonl and reset state',
+    '  export  — Open live dashboard in browser',
+    '  <text>  — Activate autoresearch mode with given goal',
+    '',
+    'Use pi-autoresearch CLI for experiment operations:',
+    '  pi-autoresearch activate "goal"',
+    '  pi-autoresearch init --name ... --metric-name ...',
+    '  pi-autoresearch run "bash autoresearch.sh"',
+    '  pi-autoresearch log --metric N --status keep --description "..."',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Extension
 // ---------------------------------------------------------------------------
 
+// Late-bound: we need pi and getRuntime in the resume pipeline but they're
+// only available inside the extension function. These are set once during init.
+let _pi: ExtensionAPI;
+let _getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime;
+
+function getRuntimeFromCtx(ctx: ExtensionContext): AutoresearchRuntime {
+  return _getRuntime(ctx);
+}
+
 export default function autoresearchExtension(pi: ExtensionAPI) {
+  _pi = pi;
   const runtimeStore = createRuntimeStore();
   const getSessionKey = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
   const getRuntime = (ctx: ExtensionContext): AutoresearchRuntime =>
     runtimeStore.ensure(getSessionKey(ctx));
+  _getRuntime = getRuntime;
 
   const uiState: FullscreenState = createFullscreenState();
   const clearOverlay = () => clearFullscreen(uiState);
@@ -416,49 +858,114 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   // ===========================================================================
 
   pi.registerCommand('autoresearch', {
-    description: 'Start, stop, or clear autoresearch mode',
+    description: 'Start, stop, export, or clear autoresearch mode',
     handler: async (args, extCtx) => {
       const runtime = getRuntime(extCtx);
       const trimmedArgs = (args ?? '').trim();
       const command = trimmedArgs.toLowerCase();
 
       if (!trimmedArgs) {
-        extCtx.ui.notify('Usage: /autoresearch [off|clear|<text>]', 'info');
+        extCtx.ui.notify(autoresearchHelp(), 'info');
         return;
       }
 
       if (command === 'off') {
+        const wasRunning = !extCtx.isIdle();
+
         runtime.autoresearchMode = false;
         runtime.dashboardExpanded = false;
+        runtime.autoResumeTurns = 0;
+        runtime.experimentsThisSession = 0;
+        runtime.lastRunChecks = null;
+        runtime.lastRunDuration = null;
+        runtime.runningExperiment = null;
+        cancelPendingResume(runtime);
+        stopDashboardServer();
+
         if (runtime.jsonlWatcher) {
           runtime.jsonlWatcher.close();
           runtime.jsonlWatcher = null;
         }
         clearSessionUi(extCtx, clearOverlay);
-        extCtx.ui.notify('Autoresearch mode OFF', 'info');
+
+        if (wasRunning) extCtx.abort();
+
+        extCtx.ui.notify(
+          wasRunning ? 'Autoresearch mode OFF — aborting current run' : 'Autoresearch mode OFF',
+          'info'
+        );
+        return;
+      }
+
+      if (command === 'export') {
+        await exportDashboard(extCtx);
         return;
       }
 
       if (command === 'clear') {
+        const workDir = resolveWorkDir(extCtx.cwd);
+        const jsonlPath = autoresearchJsonlPath(workDir);
+
+        runtime.autoresearchMode = false;
+        runtime.dashboardExpanded = false;
+        runtime.autoResumeTurns = 0;
+        runtime.experimentsThisSession = 0;
+        runtime.lastRunChecks = null;
+        runtime.runningExperiment = null;
+        cancelPendingResume(runtime);
+        runtime.state = createExperimentState();
+        stopDashboardServer();
+
         if (runtime.jsonlWatcher) {
           runtime.jsonlWatcher.close();
           runtime.jsonlWatcher = null;
         }
-        runtime.autoresearchMode = false;
-        runtime.dashboardExpanded = false;
-        runtime.state = createExperimentState();
         runtime.worktreeDir = null;
         updateWidget(extCtx);
-        extCtx.ui.notify('Autoresearch cleared', 'info');
+
+        if (fs.existsSync(jsonlPath)) {
+          try {
+            fs.unlinkSync(jsonlPath);
+            extCtx.ui.notify('Deleted autoresearch.jsonl and turned autoresearch mode OFF', 'info');
+          } catch (error) {
+            extCtx.ui.notify(
+              `Failed to delete autoresearch.jsonl: ${error instanceof Error ? error.message : String(error)}`,
+              'error'
+            );
+          }
+        } else {
+          extCtx.ui.notify('No autoresearch.jsonl found. Autoresearch mode OFF', 'info');
+        }
         return;
       }
 
-      // Activate — delegate to CLI
+      if (runtime.autoresearchMode) {
+        extCtx.ui.notify(
+          "Autoresearch already active — use '/autoresearch off' to stop first",
+          'info'
+        );
+        return;
+      }
+
+      // Activate
       runtime.autoresearchMode = true;
-      extCtx.ui.notify('Autoresearch mode ON — use pi-autoresearch CLI to run experiments', 'info');
-      pi.sendUserMessage(
-        `Autoresearch mode active: ${trimmedArgs}. Use pi-autoresearch activate, init, run, and log to run experiments.`
+      runtime.autoResumeTurns = 0;
+
+      const workDir = resolveWorkDir(extCtx.cwd);
+      const hasRules = fs.existsSync(autoresearchMdPath(workDir));
+
+      extCtx.ui.notify(
+        hasRules
+          ? 'Autoresearch mode ON — rules loaded from autoresearch.md'
+          : 'Autoresearch mode ON — no autoresearch.md found, setting up',
+        'info'
       );
+
+      const kickoff = hasRules
+        ? `Autoresearch mode active. ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`
+        : `Start autoresearch: ${trimmedArgs} ${BENCHMARK_GUARDRAIL}`;
+
+      sendWhenReady(pi, extCtx, kickoff);
     },
   });
 
@@ -486,43 +993,118 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   });
 
   // ===========================================================================
-  // Lifecycle
+  // System prompt injection — autoresearch guidance on every turn
   // ===========================================================================
 
-  pi.on('session_start', async (_event, ctx) => {
+  pi.on('before_agent_start', async (event, extCtx) => {
+    const runtime = getRuntime(extCtx);
+    if (!runtime.autoresearchMode) return;
+
+    const workDir = runtime.worktreeDir ?? resolveWorkDir(extCtx.cwd);
+    const mdPath = autoresearchMdPath(workDir);
+    const ideasPath = autoresearchIdeasPath(workDir);
+    const hasIdeas = fs.existsSync(ideasPath);
+
+    const checksPath = autoresearchChecksPath(workDir);
+    const hasChecks = fs.existsSync(checksPath);
+
+    let extra =
+      '\n\n## Autoresearch Mode (ACTIVE)' +
+      '\nYou are in autoresearch mode. Optimize the primary metric through an autonomous experiment loop.' +
+      '\nUse pi-autoresearch init, run, and log to manage experiments. NEVER STOP until interrupted.' +
+      `\nExperiment rules: ${mdPath} — read this file at the start of every session and after compaction.` +
+      "\nWrite promising but deferred optimizations as bullet points to autoresearch.ideas.md — don't let good ideas get lost." +
+      `\n${BENCHMARK_GUARDRAIL}` +
+      '\nIf the user sends a follow-on message while an experiment is running, finish the current run + log cycle first, then address their message in the next iteration.';
+
+    if (hasChecks) {
+      extra +=
+        '\n\n## Backpressure Checks (ACTIVE)' +
+        `\n${checksPath} exists and runs automatically after every passing benchmark in pi-autoresearch run.` +
+        '\nIf the benchmark passes but checks fail, run will report it clearly.' +
+        "\nUse status 'checks_failed' in log when this happens — it behaves like a crash (no commit, changes auto-reverted)." +
+        "\nYou cannot use status 'keep' when checks have failed." +
+        '\nThe checks execution time does NOT affect the primary metric.';
+    }
+
+    if (hasIdeas) {
+      extra += `\n\n💡 Ideas backlog exists at ${ideasPath} — check it for promising experiment paths. Prune stale entries.`;
+    }
+
+    return {
+      systemPrompt: event.systemPrompt + extra,
+    };
+  });
+
+  // ===========================================================================
+  // Lifecycle — auto-compact resume pipeline
+  // ===========================================================================
+
+  pi.on('agent_start', async (_event, extCtx) => {
+    const runtime = getRuntime(extCtx);
+    runtime.experimentsThisSession = 0;
+    pausePendingResume(runtime);
+  });
+
+  pi.on('session_before_compact', async (_event, extCtx) => {
+    pausePendingResume(getRuntime(extCtx));
+  });
+
+  pi.on('session_compact', async (_event, extCtx) => {
+    ensurePendingResume(pi, extCtx, shouldAutoResumeAfterCompact);
+  });
+
+  pi.on('agent_end', async (_event, extCtx) => {
+    const runtime = getRuntime(extCtx);
+    runtime.runningExperiment = null;
+    ensurePendingResume(pi, extCtx, shouldAutoResumeAfterTurn);
+  });
+
+  // ===========================================================================
+  // Lifecycle — session management
+  // ===========================================================================
+
+  pi.on('session_start', async (_event, extCtx) => {
     installShellAlias();
-    writeSessionId(ctx, getDirs());
+    writeSessionId(extCtx, getDirs());
     harnessServer.start();
 
     // Reconstruct state from existing JSONL
-    const runtime = getRuntime(ctx);
-    const sessionId = getSessionKey(ctx);
+    const runtime = getRuntime(extCtx);
+    const sessionId = getSessionKey(extCtx);
 
     // Auto-detect worktree
     if (!runtime.worktreeDir) {
       const { detectAutoresearchWorktree } = await import('./src/git/index.js');
-      const detected = detectAutoresearchWorktree(ctx.cwd, sessionId);
+      const detected = detectAutoresearchWorktree(extCtx.cwd, sessionId);
       if (detected) {
         runtime.worktreeDir = detected;
       }
     }
 
-    if (runtime.worktreeDir) {
-      reconstructStateFromJsonl(runtime, runtime.worktreeDir);
-      startJsonlWatcher(ctx, getRuntime, updateWidget);
-      updateWidget(ctx);
+    const workDir = runtime.worktreeDir ?? resolveWorkDir(extCtx.cwd);
+    const jsonlPath = autoresearchJsonlPath(workDir);
+
+    // Auto-activate if autoresearch.jsonl exists (resume scenario)
+    if (fs.existsSync(jsonlPath)) {
+      runtime.autoresearchMode = true;
     }
+
+    reconstructStateFromJsonl(runtime, workDir);
+    startJsonlWatcher(extCtx, getRuntime, updateWidget);
+    updateWidget(extCtx);
   });
 
-  pi.on('session_before_switch', async (event, ctx) => {
-    const runtime = getRuntime(ctx);
+  pi.on('session_before_switch', async (event, extCtx) => {
+    const runtime = getRuntime(extCtx);
+    cancelPendingResume(runtime);
     if (runtime.jsonlWatcher) {
       runtime.jsonlWatcher.close();
       runtime.jsonlWatcher = null;
     }
     if (event.reason === 'new') {
-      clearSessionUi(ctx, clearOverlay);
-      runtimeStore.clear(getSessionKey(ctx));
+      clearSessionUi(extCtx, clearOverlay);
+      runtimeStore.clear(getSessionKey(extCtx));
     }
   });
 
@@ -530,14 +1112,16 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     clearOverlay();
   });
 
-  pi.on('session_shutdown', async (_e, ctx) => {
-    const runtime = getRuntime(ctx);
+  pi.on('session_shutdown', async (_e, extCtx) => {
+    const runtime = getRuntime(extCtx);
+    cancelPendingResume(runtime);
     if (runtime.jsonlWatcher) {
       runtime.jsonlWatcher.close();
       runtime.jsonlWatcher = null;
     }
-    clearSessionUi(ctx, clearOverlay);
-    runtimeStore.clear(getSessionKey(ctx));
+    clearSessionUi(extCtx, clearOverlay);
+    runtimeStore.clear(getSessionKey(extCtx));
     harnessServer.stop();
+    stopDashboardServer();
   });
 }

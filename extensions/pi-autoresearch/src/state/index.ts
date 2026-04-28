@@ -30,7 +30,6 @@ export function createSessionRuntime(): AutoresearchRuntime {
   return {
     autoresearchMode: false,
     dashboardExpanded: false,
-    lastAutoResumeTime: 0,
     experimentsThisSession: 0,
     autoResumeTurns: 0,
     lastRunChecks: null,
@@ -42,6 +41,8 @@ export function createSessionRuntime(): AutoresearchRuntime {
     worktreeDir: null,
     startingCommit: null,
     jsonlWatcher: null,
+    pendingResumeTimer: null,
+    pendingResumeMessage: null,
   };
 }
 

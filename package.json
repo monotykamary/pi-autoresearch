@@ -12,8 +12,11 @@
     "extensions",
     "harness",
     "skills",
+    "assets",
     "README.md",
-    "LICENSE"
+    "CHANGELOG.md",
+    "LICENSE",
+    "package.json"
   ],
   "license": "MIT",
   "scripts": {

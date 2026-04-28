@@ -19,6 +19,13 @@ import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { execSync, execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import {
+  runHook,
+  steerMessageFor,
+  appendHookLogEntryIfConfigured,
+  type HookPayload,
+  type SessionSnapshot,
+} from './hooks.js';
 
 // =============================================================================
 // Types
@@ -78,6 +85,7 @@ const DENIED_METRIC_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 const MAX_AUTORESUME_TURNS = 20;
 const BENCHMARK_GUARDRAIL =
   'Be careful not to overfit to the benchmarks and do not cheat on the benchmarks.';
+const HOOKS_DIR = 'autoresearch.hooks';
 
 // =============================================================================
 // Utilities
@@ -199,6 +207,53 @@ function isAutoresearchShCommand(command: string): boolean {
   return /^(?:(?:bash|sh|source)\s+(?:-\w+\s+)*)?(?:\.\/|\/[\w/.-]*\/)?autoresearch\.sh(?:\s|$)/.test(
     cmd
   );
+}
+
+/** Best = optimal metric across kept experiments in current segment */
+function findBestMetric(results: ExperimentResult[], direction: 'lower' | 'higher'): number | null {
+  const kept = results.filter((r) => r.status === 'keep').map((r) => r.metric);
+  if (kept.length === 0) return null;
+  return direction === 'lower' ? Math.min(...kept) : Math.max(...kept);
+}
+
+/** Build a session snapshot for hook payloads */
+function buildSessionSnapshot(state: ExperimentState): SessionSnapshot {
+  // bestMetric in state is the baseline (first run). For hooks, best_metric
+  // means the best kept metric across all runs.
+  const bestMetric = findBestMetric(state.results, state.bestDirection);
+  return {
+    metric_name: state.metricName,
+    metric_unit: state.metricUnit,
+    direction: state.bestDirection,
+    baseline_metric: state.bestMetric,
+    best_metric: bestMetric,
+    run_count: state.results.length,
+    goal: state.name ?? '',
+  };
+}
+
+/** Read the last run entry from autoresearch.jsonl for hook payloads */
+function readLastRunJsonl(workDir: string): Record<string, unknown> | null {
+  const jsonlPath = join(workDir, 'autoresearch.jsonl');
+  if (!fs.existsSync(jsonlPath)) return null;
+  try {
+    const lines = fs.readFileSync(jsonlPath, 'utf-8').split('\n').filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry = JSON.parse(lines[i]);
+        if (entry && typeof entry === 'object' && typeof entry.run === 'number') return entry;
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
+/** Fire a hook and return the steer message (or null) */
+async function fireHook(payload: HookPayload): Promise<string | null> {
+  const result = await runHook(payload);
+  const jsonlPath = join(payload.cwd, 'autoresearch.jsonl');
+  appendHookLogEntryIfConfigured(jsonlPath, payload.event, result);
+  return steerMessageFor(payload.event, result);
 }
 
 function killTree(pid: number): void {
@@ -830,6 +885,18 @@ async function dispatchAction(
         };
       }
 
+      // Fire before-hook (before capturing starting commit / running experiment)
+      let beforeHookSteer: string | null = null;
+      try {
+        beforeHookSteer = await fireHook({
+          event: 'before',
+          cwd: workDir,
+          next_run: state.results.length + 1,
+          last_run: readLastRunJsonl(workDir),
+          session: buildSessionSnapshot(state),
+        });
+      } catch {}
+
       // Clear stale starting commit
       session.startingCommit = null;
 
@@ -1021,6 +1088,9 @@ async function dispatchAction(
 
       // Build response text
       let text = '';
+      if (beforeHookSteer) {
+        text += `🪝 before-hook: ${beforeHookSteer}\n\n`;
+      }
       if (timedOut) {
         text += `⏰ TIMEOUT after ${durationSeconds.toFixed(1)}s\n`;
       } else if (!benchmarkPassed) {
@@ -1311,6 +1381,19 @@ async function dispatchAction(
           text += `\n⚠️ Git revert failed: ${e instanceof Error ? e.message : String(e)}`;
         }
       }
+
+      // Fire after-hook (after logging, before clearing state)
+      try {
+        const afterSteer = await fireHook({
+          event: 'after',
+          cwd: workDir,
+          run_entry: { run: allResultsCount, ...experiment },
+          session: buildSessionSnapshot(state),
+        });
+        if (afterSteer) {
+          text += `\n🪝 after-hook: ${afterSteer}`;
+        }
+      } catch {}
 
       // Clear running state
       session.runningExperiment = null;

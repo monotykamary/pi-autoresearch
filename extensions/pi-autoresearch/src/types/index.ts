@@ -57,7 +57,6 @@ export interface ExperimentState {
 export interface AutoresearchRuntime {
   autoresearchMode: boolean;
   dashboardExpanded: boolean;
-  lastAutoResumeTime: number;
   experimentsThisSession: number;
   autoResumeTurns: number;
   lastRunChecks: { pass: boolean; output: string; duration: number } | null;
@@ -74,4 +73,8 @@ export interface AutoresearchRuntime {
   startingCommit: string | null;
   /** File watcher for autoresearch.jsonl to enable real-time UI updates */
   jsonlWatcher: { close(): void } | null;
+  /** Pending auto-resume timer; cancelled when the agent starts a new run or compacts. */
+  pendingResumeTimer: ReturnType<typeof setTimeout> | null;
+  /** Resume message to send when the pending timer fires. */
+  pendingResumeMessage: string | null;
 }

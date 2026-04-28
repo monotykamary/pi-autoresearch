@@ -6,7 +6,8 @@
     "extensions/pi-autoresearch/src/lifecycle/handlers.ts",
     "extensions/pi-autoresearch/src/lifecycle/index.ts",
     "extensions/pi-autoresearch/src/tools/index.ts",
-    "harness/server.ts"
+    "harness/server.ts",
+    "harness/hooks.ts"
   ],
   "ignoreExportsUsedInFile": true,
   "workspaces": {
