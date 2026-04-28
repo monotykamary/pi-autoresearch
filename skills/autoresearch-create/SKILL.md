@@ -18,33 +18,46 @@ Autoresearch is designed for **systematic experimentation** — it adds overhead
 
 For quick wins — one-shot fixes, lint/type feedback under 1s, or trivial changes — regular `bash` and `edit` are faster. Use this skill when the autonomous loop justifies the setup cost.
 
-## Tools
+## CLI
 
-The experiment tools (`init_experiment`, `run_experiment`, `log_experiment`) are **hidden by default** and only appear when autoresearch mode is activated via `/autoresearch`. This prevents the model from calling them unprompted. Once active, the tools stay available until the loop ends or is explicitly stopped.
+The `pi-autoresearch` CLI auto-spawns a long-lived harness server on first use. Every call dispatches an action to the harness, which holds persistent experiment state across calls.
 
-- **`init_experiment`** — configure session (name, metric, unit, direction, target_value). Call again to re-initialize with a new baseline when the optimization target changes.
-- **`run_experiment`** — runs command, times it, captures output.
-- **`log_experiment`** — records result. `keep` auto-commits. `discard`/`crash`/`checks_failed` auto-reverts code changes (autoresearch files preserved). Always include secondary `metrics` dict. Dashboard: ctrl+shift+a.
+```bash
+pi-autoresearch activate "<goal>"   # Enter autoresearch mode, create worktree
+pi-autoresearch init --name "..." --metric-name "..." [--metric-unit ""] [--direction lower|higher] [--target-value N] [--max-experiments N]
+pi-autoresearch run "<command>" [--timeout 600] [--checks-timeout 300]
+pi-autoresearch log --metric N --status keep|discard|crash|checks_failed --description "..." [--metrics '{"k":v}'] [--asi '{"k":"v"}'] [--force]
+pi-autoresearch status              # Show current experiment state
+pi-autoresearch list                # List all results
+pi-autoresearch deactivate          # Leave autoresearch mode
+pi-autoresearch clear               # Clear state and remove worktree
+```
 
-### Target Value
+Also accepts JSON for programmatic use:
 
-Optionally pass `target_value` to `init_experiment` to stop when the metric reaches a specific threshold:
+```bash
+pi-autoresearch '{ "action": "run", "command": "bash autoresearch.sh" }'
+```
 
-- `direction: "lower"` + `target_value: 1000` → stops when metric ≤ 1000
-- `direction: "higher"` + `target_value: 0.95` → stops when metric ≥ 0.95
+### Server management
 
-When target is hit, the loop stops automatically. No max experiments, no time limits — target or bust.
+| Command                     | Behavior                            |
+| --------------------------- | ----------------------------------- |
+| `pi-autoresearch --status`  | Print health JSON or exit 1 if down |
+| `pi-autoresearch --start`   | Start the harness server            |
+| `pi-autoresearch --stop`    | Graceful shutdown                   |
+| `pi-autoresearch --restart` | Stop + start fresh                  |
+| `pi-autoresearch --logs`    | `tail -f` the server log            |
 
-## Setup
+Env vars: `PI_AUTORESEARCH_PORT` (default `9878`), `PI_AUTORESEARCH_LOG` (default `/tmp/pi-autoresearch-harness.log`).
+
+## Workflow
 
 1. Ask (or infer): **Goal**, **Command**, **Metric** (+ direction), **Target** (optional), **Files in scope**, **Constraints**.
-2. `/autoresearch <goal description>` — this automatically creates:
-   - A git branch `autoresearch/<session-id>`
-   - A git worktree at `autoresearch/<session-id>/` inside the project
-   - All experiments run in this isolated worktree, leaving your main working directory clean
-3. Read the source files. Understand the workload deeply before writing anything.
-4. Write `autoresearch.md` and `autoresearch.sh` inside the worktree. Commit both.
-5. `init_experiment` (with optional `target_value`) → run baseline → `log_experiment` → start looping immediately.
+2. `pi-autoresearch activate "optimize X"` — creates a git worktree at `autoresearch/<session-id>/`.
+3. Write `autoresearch.md` and `autoresearch.sh` inside the worktree. Commit both.
+4. `pi-autoresearch init --name "..." --metric-name "..." --direction lower` → run baseline → `pi-autoresearch log --metric N --status keep --description "baseline"` → start looping immediately.
+5. `pi-autoresearch run "bash autoresearch.sh"` → `pi-autoresearch log --metric N --status keep|discard --description "..." --asi '{"hypothesis":"..."}'` → repeat forever.
 
 ### Worktree Pattern
 
@@ -66,13 +79,12 @@ project/
 - Main working directory stays clean — no pollution from failed experiments
 - Side commits accumulate in the worktree without affecting your main branch
 - Easy to merge back successful changes, discard the rest
-- Multiple autoresearch sessions can run in parallel (different worktrees)
 
 **Lifecycle:**
 
-1. `/autoresearch optimize X` → creates worktree automatically
+1. `pi-autoresearch activate "optimize X"` → creates worktree automatically
 2. Experiments run inside `autoresearch/<session-id>/`
-3. `/autoresearch off` or `/autoresearch clear` → removes worktree and branch
+3. `pi-autoresearch clear` → removes worktree and branch
 
 ### `autoresearch.md`
 
@@ -123,7 +135,7 @@ Bash script (`set -euo pipefail`) that: pre-checks fast (syntax errors in <1s), 
 
 #### Structured output
 
-- `METRIC name=value` — primary metric (must match `init_experiment`'s `metric_name`) and any secondary metrics. Parsed automatically by `run_experiment`.
+- `METRIC name=value` — primary metric (must match `init`'s `--metric-name`) and any secondary metrics. Parsed automatically by `run`.
 
 #### Design the script to inform optimization
 
@@ -136,9 +148,9 @@ The script should output **whatever data helps you make better decisions in the 
 
 The script runs the same code every iteration — but you can **update it during the loop** if you discover you need more signal. Add instrumentation as you learn what matters.
 
-#### Agent-supplied ASI via `log_experiment`
+#### Agent-supplied ASI via `log`
 
-Use `log_experiment`'s `asi` parameter to annotate each run with **whatever would help the next iteration make a better decision.** Free-form key/value pairs — you decide what's worth recording. Don't repeat the description or raw output; capture what you'd lose after a context reset.
+Use `log`'s `--asi` parameter to annotate each run with **whatever would help the next iteration make a better decision.** Free-form key/value pairs — you decide what's worth recording. Don't repeat the description or raw output; capture what you'd lose after a context reset.
 
 **Annotate failures and crashes heavily.** Discarded and crashed runs are reverted — the code changes are gone. The only record that survives is the description and ASI in `autoresearch.jsonl`. If you don't capture what you tried and why it failed, future iterations will waste time re-discovering the same dead ends.
 
@@ -148,15 +160,15 @@ Bash script (`set -euo pipefail`) for backpressure/correctness checks: tests, ty
 
 When this file exists:
 
-- Runs automatically after every **passing** benchmark in `run_experiment`.
-- If checks fail, `run_experiment` reports it clearly — log as `checks_failed`.
+- Runs automatically after every **passing** benchmark in `run`.
+- If checks fail, `run` reports it clearly — log as `--status checks_failed`.
 - Its execution time does **NOT** affect the primary metric.
-- You cannot `keep` a result when checks have failed.
-- Has a separate timeout (default 300s, configurable via `checks_timeout_seconds`).
+- You cannot `--status keep` a result when checks have failed.
+- Has a separate timeout (default 300s, configurable via `--checks-timeout`).
 
 When this file does **not** exist, everything behaves exactly as before — no changes to the loop.
 
-**Keep output minimal.** Only the last 80 lines of checks output are fed back to the agent on failure. Suppress verbose progress/success output and let only errors through. This keeps context lean and helps the agent pinpoint what broke.
+**Keep output minimal.** Only the last 80 lines of checks output are fed back on failure. Suppress verbose progress/success output and let only errors through. This keeps context lean and helps the agent pinpoint what broke.
 
 ```bash
 #!/bin/bash
@@ -170,9 +182,9 @@ pnpm typecheck 2>&1 | grep -i error || true
 
 **LOOP FOREVER.** Never ask "should I continue?" — the user expects autonomous work.
 
-- **Primary metric is king.** Improved → `keep`. Worse/equal → `discard`. Secondary metrics rarely affect this.
-- **Annotate every run with `asi`.** Record what you learned — not what you did. What would help the next iteration or a fresh agent resuming this session?
-- **Watch the confidence score.** After 3+ runs, `log_experiment` reports a confidence score (best improvement as a multiple of the session noise floor). ≥2.0× means the improvement is likely real. <1.0× means it's within noise — consider re-running to confirm before keeping. The score is advisory — it never auto-discards.
+- **Primary metric is king.** Improved → `--status keep`. Worse/equal → `--status discard`. Secondary metrics rarely affect this.
+- **Annotate every run with `--asi`.** Record what you learned — not what you did. What would help the next iteration or a fresh agent resuming this session?
+- **Watch the confidence score.** After 3+ runs, `log` reports a confidence score (best improvement as a multiple of the session noise floor). ≥2.0× means the improvement is likely real. <1.0× means it's within noise — consider re-running to confirm before keeping. The score is advisory — it never auto-discards.
 - **Simpler is better.** Removing code for equal perf = keep. Ugly complexity for tiny gain = probably discard.
 - **Don't thrash.** Repeatedly reverting the same idea? Try something structurally different.
 - **Crashes:** fix if trivial, otherwise log and move on. Don't over-invest.
@@ -189,4 +201,17 @@ On resume (context limit, crash), check `autoresearch.ideas.md` — prune stale/
 
 ## User Messages During Experiments
 
-If the user sends a message while an experiment is running, finish the current `run_experiment` + `log_experiment` cycle first, then incorporate their feedback in the next iteration. Don't abandon a running experiment.
+If the user sends a message while an experiment is running, finish the current `run` + `log` cycle first, then incorporate their feedback in the next iteration. Don't abandon a running experiment.
+
+## System Prompt Guidance
+
+When autoresearch mode is active, follow these rules:
+
+- You are in autoresearch mode for LONG-HORIZON OPTIMIZATION with verifiable metrics.
+- Purpose: Optimize a primary metric through an autonomous experiment loop. NEVER STOP until interrupted.
+- Read `autoresearch.md` at the start of every session and after compaction.
+- Write promising but deferred optimizations as bullet points to `autoresearch.ideas.md`.
+- Be careful not to overfit to the benchmarks and do not cheat on the benchmarks.
+- Autoresearch is ONLY for long-horizon optimization tasks with verifiable metrics. Do NOT use for: general development, one-off commits, exploratory coding without a metric, or tasks without a measurable optimization target.
+- If `autoresearch.checks.sh` exists, it runs automatically after every passing benchmark. If checks fail, log as `--status checks_failed`. You cannot use `--status keep` when checks failed.
+- If the user sends a follow-on message while an experiment is running, finish the current run + log cycle first, then address their message.

@@ -1,8 +1,10 @@
 /**
  * Metric parsing utilities
+ *
+ * Note: inferUnit has moved to the harness server (which has its own copy).
  */
 
-import { METRIC_LINE_PREFIX, DENIED_METRIC_NAMES } from "../constants.js";
+import { METRIC_LINE_PREFIX, DENIED_METRIC_NAMES } from '../constants.js';
 
 /**
  * Parse structured METRIC lines from command output.
@@ -11,10 +13,7 @@ import { METRIC_LINE_PREFIX, DENIED_METRIC_NAMES } from "../constants.js";
  */
 export function parseMetricLines(output: string): Map<string, number> {
   const metrics = new Map<string, number>();
-  const regex = new RegExp(
-    `^${METRIC_LINE_PREFIX}\\s+([\\w.µ]+)=(\\S+)\\s*$`,
-    "gm"
-  );
+  const regex = new RegExp(`^${METRIC_LINE_PREFIX}\\s+([\\w.µ]+)=(\\S+)\\s*$`, 'gm');
   let match;
   while ((match = regex.exec(output)) !== null) {
     const name = match[1];
@@ -25,14 +24,4 @@ export function parseMetricLines(output: string): Map<string, number> {
     }
   }
   return metrics;
-}
-
-/** Infer unit from metric name suffix */
-export function inferUnit(name: string): string {
-  if (name.endsWith("µs")) return "µs";
-  if (name.endsWith("_ms")) return "ms";
-  if (name.endsWith("_s") || name.endsWith("_sec")) return "s";
-  if (name.endsWith("_kb")) return "kb";
-  if (name.endsWith("_mb")) return "mb";
-  return "";
 }

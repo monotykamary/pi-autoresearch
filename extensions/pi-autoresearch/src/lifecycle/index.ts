@@ -2,5 +2,6 @@
  * Lifecycle handlers exports
  */
 
-export { registerLifecycleHandlers, createStateReconstructor } from "./handlers.js";
-export { createPromptExtender } from "./prompt.js";
+// Prompt injection removed — all guidance is in the SKILL.md now.
+// The harness server manages experiment state; the extension only
+// handles UI updates and session cleanup.

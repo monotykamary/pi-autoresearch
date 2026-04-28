@@ -1,14 +1,12 @@
 /**
  * State management for autoresearch sessions
+ *
+ * Note: updateStateAfterLog, resetForReinit, and resetSessionCounters
+ * have moved to the harness server. This module only retains what the
+ * extension UI and tests need.
  */
 
-import type {
-  ExperimentState,
-  AutoresearchRuntime,
-  ExperimentResult,
-  MetricDef,
-} from '../types/index.js';
-import { inferUnit, computeConfidence } from '../utils/index.js';
+import type { ExperimentState, AutoresearchRuntime } from '../types/index.js';
 
 /** Create a fresh experiment state */
 export function createExperimentState(): ExperimentState {
@@ -71,44 +69,4 @@ export function createRuntimeStore() {
   };
 }
 
-/** Register secondary metrics from an experiment result */
-export function registerSecondaryMetrics(
-  state: ExperimentState,
-  metrics: Record<string, number>
-): void {
-  for (const name of Object.keys(metrics)) {
-    if (!state.secondaryMetrics.find((m) => m.name === name)) {
-      state.secondaryMetrics.push({ name, unit: inferUnit(name) });
-    }
-  }
-}
-
-/** Update state after logging a new experiment */
-export function updateStateAfterLog(state: ExperimentState, experiment: ExperimentResult): void {
-  // Register any new secondary metric names
-  registerSecondaryMetrics(state, experiment.metrics);
-
-  // Recalculate baseline (first result overall)
-  state.bestMetric = state.results[0]?.metric ?? null;
-
-  // Recalculate confidence across all results
-  state.confidence = computeConfidence(state.results, state.bestDirection);
-  experiment.confidence = state.confidence;
-}
-
-/** Reset runtime state for a new segment/reinit */
-export function resetForReinit(state: ExperimentState, incrementSegment: boolean = true): void {
-  if (incrementSegment) {
-    state.currentSegment++;
-  }
-  state.bestMetric = null;
-  state.secondaryMetrics = [];
-  state.confidence = null;
-}
-
-/** Reset session-specific counters */
-export function resetSessionCounters(runtime: AutoresearchRuntime): void {
-  runtime.experimentsThisSession = 0;
-  runtime.autoResumeTurns = 0;
-  runtime.lastAutoResumeTime = 0;
-}
+// registerSecondaryMetrics moved to harness server

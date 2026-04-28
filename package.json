@@ -5,6 +5,16 @@
   "keywords": [
     "pi-package"
   ],
+  "bin": {
+    "pi-autoresearch": "harness/cli.ts"
+  },
+  "files": [
+    "extensions",
+    "harness",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
   "license": "MIT",
   "scripts": {
     "test": "vitest run",
@@ -14,6 +24,7 @@
     "lint:dead": "knip --no-gitignore",
     "postinstall": "simple-git-hooks 2>/dev/null || true"
   },
+  "type": "module",
   "pi": {
     "extensions": [
       "./extensions"

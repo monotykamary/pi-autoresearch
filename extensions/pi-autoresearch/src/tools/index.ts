@@ -1,16 +1,9 @@
 /**
  * Tool registration exports
+ *
+ * NOTE: Tools have been migrated to the harness server.
+ * The pi-autoresearch CLI now handles all experiment interactions.
+ * This module is kept empty to avoid breaking imports.
  */
 
-export { registerInitExperiment } from './init-experiment.js';
-export { registerRunExperiment } from './run-experiment.js';
-export { registerLogExperiment } from './log-experiment.js';
-export { registerRedirectedFileTools } from './file-redirect.js';
-export { registerRedirectedBashTool } from './bash-redirect.js';
-export { InitParams, RunParams, LogParams } from './schemas.js';
-export {
-  activateAutoresearchTools,
-  deactivateAutoresearchTools,
-  excludeAutoresearchToolsFromDefaults,
-  AUTORESEARCH_TOOL_NAMES,
-} from './activation.js';
+export const AUTORESEARCH_TOOL_NAMES: readonly string[] = [];
