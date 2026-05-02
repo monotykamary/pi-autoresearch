@@ -1,5 +1,8 @@
 /**
  * Core type definitions for autoresearch extension
+ *
+ * Note: RunDetails and LogDetails have moved to the harness server.
+ * These types are only what the extension UI and tests need.
  */
 
 /**
@@ -15,7 +18,7 @@ export interface ExperimentResult {
   metric: number;
   /** Additional tracked metrics: { name: value } */
   metrics: Record<string, number>;
-  status: "keep" | "discard" | "crash" | "checks_failed";
+  status: 'keep' | 'discard' | 'crash' | 'checks_failed';
   description: string;
   timestamp: number;
   /** Segment index — increments on each config header. Current segment = highest. */
@@ -35,7 +38,7 @@ export interface ExperimentState {
   results: ExperimentResult[];
   /** Baseline primary metric (from first experiment in current segment) */
   bestMetric: number | null;
-  bestDirection: "lower" | "higher";
+  bestDirection: 'lower' | 'higher';
   metricName: string;
   metricUnit: string;
   /** Definitions for secondary metrics (order preserved) */
@@ -51,38 +54,9 @@ export interface ExperimentState {
   targetValue: number | null;
 }
 
-export interface RunDetails {
-  command: string;
-  exitCode: number | null;
-  durationSeconds: number;
-  passed: boolean;
-  crashed: boolean;
-  timedOut: boolean;
-  tailOutput: string;
-  /** null = checks not run (no file or benchmark failed), true/false = ran */
-  checksPass: boolean | null;
-  checksTimedOut: boolean;
-  checksOutput: string;
-  checksDuration: number;
-  /** Metrics parsed from METRIC lines in output. null if none found. */
-  parsedMetrics: Record<string, number> | null;
-  /** Primary metric value extracted from parsedMetrics (matching metricName). null if not found. */
-  parsedPrimary: number | null;
-  /** Name of the primary metric (for display) */
-  metricName: string;
-  metricUnit: string;
-}
-
-export interface LogDetails {
-  experiment: ExperimentResult;
-  wallClockSeconds: number | null;
-  state: ExperimentState;
-}
-
 export interface AutoresearchRuntime {
   autoresearchMode: boolean;
   dashboardExpanded: boolean;
-  lastAutoResumeTime: number;
   experimentsThisSession: number;
   autoResumeTurns: number;
   lastRunChecks: { pass: boolean; output: string; duration: number } | null;
@@ -95,8 +69,12 @@ export interface AutoresearchRuntime {
   state: ExperimentState;
   /** Path to the session-specific git worktree for isolation, or null if not using worktree */
   worktreeDir: string | null;
-  /** Git commit hash captured at run_experiment entry (before AI modifications). Used by log_experiment for the experiment record. */
+  /** Git commit hash captured at run_experiment entry (before AI modifications). */
   startingCommit: string | null;
   /** File watcher for autoresearch.jsonl to enable real-time UI updates */
   jsonlWatcher: { close(): void } | null;
+  /** Pending auto-resume timer; cancelled when the agent starts a new run or compacts. */
+  pendingResumeTimer: ReturnType<typeof setTimeout> | null;
+  /** Resume message to send when the pending timer fires. */
+  pendingResumeMessage: string | null;
 }

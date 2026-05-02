@@ -19,6 +19,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["./extensions/**/*.ts", "./skills/**/*.ts"],
+  "include": ["./extensions/**/*.ts", "./skills/**/*.ts", "./harness/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }
