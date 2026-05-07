@@ -4,9 +4,6 @@
 
 import { describe, it, expect } from 'vitest';
 
-// ============================================================================
-// /autoresearch duplicate command guard
-// ============================================================================
 interface RuntimeForDuplicateGuard {
   autoresearchMode: boolean;
   state: { name: string | null };

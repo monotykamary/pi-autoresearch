@@ -853,10 +853,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     return { base: baseDir };
   }
 
-  // ===========================================================================
-  // /autoresearch command
-  // ===========================================================================
-
   pi.registerCommand('autoresearch', {
     description: 'Start, stop, export, or clear autoresearch mode',
     handler: async (args, extCtx) => {
@@ -969,10 +965,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     },
   });
 
-  // ===========================================================================
-  // Keyboard shortcuts
-  // ===========================================================================
-
   pi.registerShortcut('ctrl+shift+a', {
     description: 'Toggle autoresearch dashboard',
     handler: async (ctx) => {
@@ -991,10 +983,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     description: 'Fullscreen autoresearch dashboard',
     handler: showFullscreen,
   });
-
-  // ===========================================================================
-  // System prompt injection — autoresearch guidance on every turn
-  // ===========================================================================
 
   pi.on('before_agent_start', async (event, extCtx) => {
     const runtime = getRuntime(extCtx);
@@ -1036,10 +1024,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     };
   });
 
-  // ===========================================================================
-  // Lifecycle — auto-compact resume pipeline
-  // ===========================================================================
-
   pi.on('agent_start', async (_event, extCtx) => {
     const runtime = getRuntime(extCtx);
     runtime.experimentsThisSession = 0;
@@ -1059,10 +1043,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     runtime.runningExperiment = null;
     ensurePendingResume(pi, extCtx, shouldAutoResumeAfterTurn);
   });
-
-  // ===========================================================================
-  // Lifecycle — session management
-  // ===========================================================================
 
   pi.on('session_start', async (_event, extCtx) => {
     installShellAlias();

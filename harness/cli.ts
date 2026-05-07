@@ -37,10 +37,6 @@ const HOST = '127.0.0.1';
 const BASE_URL = `http://${HOST}:${PORT}`;
 const LOG = process.env.PI_AUTORESEARCH_LOG ?? '/tmp/pi-autoresearch-harness.log';
 
-// =============================================================================
-// HTTP helpers
-// =============================================================================
-
 function httpGet(url: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve) => {
     const req = http.get(url, { timeout: 2000 }, (res) => {
@@ -94,10 +90,6 @@ function httpPost(
   });
 }
 
-// =============================================================================
-// Session ID resolution
-// =============================================================================
-
 function readSessionIdFromFile(): string | undefined {
   try {
     const cwd = process.cwd();
@@ -116,10 +108,6 @@ function agentHeaders(): Record<string, string> {
   if (sessionId) headers['x-session-id'] = sessionId;
   return headers;
 }
-
-// =============================================================================
-// Server lifecycle
-// =============================================================================
 
 async function isUp(): Promise<boolean> {
   const { status } = await httpGet(`${BASE_URL}/health`);
@@ -160,10 +148,6 @@ async function startServer(): Promise<boolean> {
   return false;
 }
 
-// =============================================================================
-// Action dispatch
-// =============================================================================
-
 async function postAction(jsonBody: string): Promise<void> {
   const { status, body } = await httpPost(`${BASE_URL}/action`, jsonBody, agentHeaders());
   if (status === 200) {
@@ -192,10 +176,6 @@ async function postAction(jsonBody: string): Promise<void> {
   }
 }
 
-// =============================================================================
-// Argument parser
-// =============================================================================
-
 function extractFlag(args: string[], name: string): string | undefined {
   const idx = args.findIndex((a) => a === `--${name}`);
   if (idx !== -1 && idx + 1 < args.length) {
@@ -214,10 +194,6 @@ function extractFlagBool(args: string[], name: string): boolean {
   }
   return false;
 }
-
-// =============================================================================
-// CLI entrypoint
-// =============================================================================
 
 async function main(): Promise<void> {
   const rawArgs = process.argv.slice(2);

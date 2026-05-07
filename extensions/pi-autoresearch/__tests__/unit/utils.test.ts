@@ -10,9 +10,6 @@ import { findBaselineMetric, currentResults } from '../../src/utils/experiment.j
 import { isAutoresearchShCommand } from '../../src/utils/validate.js';
 import type { ExperimentResult } from '../../src/types/index.js';
 
-// ============================================================================
-// parseMetricLines
-// ============================================================================
 describe('parseMetricLines', () => {
   it('parses basic METRIC lines', () => {
     const output = `
@@ -118,9 +115,6 @@ METRIC latency=1.234
   });
 });
 
-// ============================================================================
-// formatNum
-// ============================================================================
 describe('formatNum', () => {
   it('formats integers with commas', () => {
     expect(formatNum(1000, '')).toBe('1,000');
@@ -155,9 +149,6 @@ describe('formatNum', () => {
   });
 });
 
-// ============================================================================
-// formatElapsed
-// ============================================================================
 describe('formatElapsed', () => {
   it('formats seconds', () => {
     expect(formatElapsed(0)).toBe('0s');
@@ -178,9 +169,6 @@ describe('formatElapsed', () => {
   });
 });
 
-// ============================================================================
-// isBetter
-// ============================================================================
 describe('isBetter', () => {
   it('handles lower-is-better correctly', () => {
     expect(isBetter(90, 100, 'lower')).toBe(true);
@@ -197,9 +185,6 @@ describe('isBetter', () => {
   });
 });
 
-// ============================================================================
-// sortedMedian
-// ============================================================================
 describe('sortedMedian', () => {
   it('returns 0 for empty array', () => {
     expect(sortedMedian([])).toBe(0);
@@ -237,9 +222,6 @@ describe('sortedMedian', () => {
   });
 });
 
-// ============================================================================
-// computeConfidence
-// ============================================================================
 describe('computeConfidence', () => {
   const createResult = (
     metric: number,
@@ -336,9 +318,6 @@ describe('computeConfidence', () => {
   });
 });
 
-// ============================================================================
-// findBaselineMetric
-// ============================================================================
 describe('findBaselineMetric', () => {
   const createResult = (metric: number, segment = 0): ExperimentResult => ({
     commit: 'abc1234',
@@ -377,9 +356,6 @@ describe('findBaselineMetric', () => {
   });
 });
 
-// ============================================================================
-// currentResults
-// ============================================================================
 describe('currentResults', () => {
   const createResult = (metric: number, segment = 0): ExperimentResult => ({
     commit: 'abc1234',
@@ -411,9 +387,6 @@ describe('currentResults', () => {
   });
 });
 
-// ============================================================================
-// isAutoresearchShCommand
-// ============================================================================
 describe('isAutoresearchShCommand', () => {
   it('accepts direct autoresearch.sh invocation', () => {
     expect(isAutoresearchShCommand('./autoresearch.sh')).toBe(true);

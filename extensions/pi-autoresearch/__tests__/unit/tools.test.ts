@@ -8,9 +8,6 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { ExperimentResult } from '../../src/types/index.js';
 
-// ============================================================================
-// File redirection path resolution
-// ============================================================================
 interface AutoresearchRuntime {
   autoresearchMode: boolean;
   worktreeDir: string | null;
@@ -111,9 +108,6 @@ describe('File redirection path resolution', () => {
   });
 });
 
-// ============================================================================
-// Experiment session guard
-// ============================================================================
 describe('Experiment session guard', () => {
   it('requires state.name to be set (would come from init_experiment)', () => {
     const stateWithoutInit = { name: null as string | null, results: [] };
@@ -158,9 +152,6 @@ describe('Experiment session guard', () => {
   });
 });
 
-// ============================================================================
-// Target value feature
-// ============================================================================
 interface ExperimentStateWithTarget {
   results: ExperimentResult[];
   bestMetric: number | null;
@@ -280,9 +271,6 @@ describe('Target value feature', () => {
   });
 });
 
-// ============================================================================
-// init_experiment file existence check (regression test)
-// ============================================================================
 describe('init_experiment file existence check', () => {
   let testDir: string;
   let jsonlPath: string;

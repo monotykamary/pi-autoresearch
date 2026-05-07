@@ -5,9 +5,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ExperimentResult } from '../../src/types/index.js';
 
-// ============================================================================
-// Stratified Chart Bucketing
-// ============================================================================
 const createSegmentResult = (
   metric: number,
   runNumber: number,

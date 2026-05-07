@@ -27,10 +27,6 @@ import {
   type SessionSnapshot,
 } from './hooks.js';
 
-// =============================================================================
-// Types
-// =============================================================================
-
 interface ExperimentResult {
   commit: string;
   metric: number;
@@ -74,10 +70,6 @@ interface SessionState {
   lastRunSucceeded: boolean | null;
 }
 
-// =============================================================================
-// Constants
-// =============================================================================
-
 const EXPERIMENT_MAX_LINES = 10;
 const EXPERIMENT_MAX_BYTES = 4 * 1024;
 const METRIC_LINE_PREFIX = 'METRIC';
@@ -86,10 +78,6 @@ const MAX_AUTORESUME_TURNS = 20;
 const BENCHMARK_GUARDRAIL =
   'Be careful not to overfit to the benchmarks and do not cheat on the benchmarks.';
 const HOOKS_DIR = 'autoresearch.hooks';
-
-// =============================================================================
-// Utilities
-// =============================================================================
 
 function commas(n: number): string {
   const s = String(Math.round(n));
@@ -333,10 +321,6 @@ function createSessionState(): SessionState {
   };
 }
 
-// =============================================================================
-// Truncation (replaces @mariozechner/pi-coding-agent truncateTail)
-// =============================================================================
-
 interface TruncationResult {
   content: string;
   truncated: boolean;
@@ -396,10 +380,6 @@ function truncateTail(
     outputLines: totalLines,
   };
 }
-
-// =============================================================================
-// Git operations
-// =============================================================================
 
 function getGlobalGitignorePath(): string | null {
   try {
@@ -582,10 +562,6 @@ function gitExec(
   }
 }
 
-// =============================================================================
-// Session management
-// =============================================================================
-
 const sessions = new Map<string, SessionState>();
 
 function getSession(cwd: string, sessionId?: string): SessionState {
@@ -672,10 +648,6 @@ function reconstructStateFromJsonl(session: SessionState, cwd: string): void {
     session.worktreeDir = preservedWorktreeDir;
   }
 }
-
-// =============================================================================
-// Action dispatch
-// =============================================================================
 
 async function dispatchAction(
   action: string,
@@ -1519,10 +1491,6 @@ async function dispatchAction(
       throw new Error(`Unknown action: ${action}`);
   }
 }
-
-// =============================================================================
-// HTTP Server
-// =============================================================================
 
 const PORT = Number(process.env.PI_AUTORESEARCH_PORT ?? 9878);
 const startedAt = Date.now();

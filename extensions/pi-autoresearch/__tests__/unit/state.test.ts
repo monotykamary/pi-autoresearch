@@ -5,9 +5,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { ExperimentResult } from '../../src/types/index.js';
 
-// ============================================================================
-// Test fixtures and helpers
-// ============================================================================
 interface TestRuntime {
   autoresearchMode: boolean;
   dashboardExpanded: boolean;
@@ -73,9 +70,6 @@ function getWidgetState(
   return { type: 'hidden' };
 }
 
-// ============================================================================
-// Widget State Behaviors
-// ============================================================================
 describe('Widget state behaviors', () => {
   describe('Initial state', () => {
     it('hides widget when no session initialized', () => {
@@ -321,9 +315,6 @@ describe('Widget state behaviors', () => {
   });
 });
 
-// ============================================================================
-// Session Lifecycle Cleanup
-// ============================================================================
 describe('Session lifecycle cleanup', () => {
   describe('New session via /new command', () => {
     it('clears widget state when session_before_switch fires with reason=new', () => {
@@ -377,9 +368,6 @@ describe('Session lifecycle cleanup', () => {
   });
 });
 
-// ============================================================================
-// Automatic Commit Tracking
-// ============================================================================
 interface RuntimeWithStartingCommit {
   startingCommit: string | null;
   autoresearchMode: boolean;
