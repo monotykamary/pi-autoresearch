@@ -2,8 +2,8 @@
  * Dashboard widget state management and rendering
  */
 
-import { Text, truncateToWidth } from '@mariozechner/pi-tui';
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { AutoresearchRuntime } from '../types/index.js';
 import { renderDashboardLines } from '../dashboard/index.js';
 import { formatNum, isBetter, currentResults, findBaselineSecondary } from '../utils/index.js';

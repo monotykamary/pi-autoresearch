@@ -2,8 +2,8 @@
  * Dashboard table rendering for experiment results
  */
 
-import type { Theme } from '@mariozechner/pi-coding-agent';
-import { truncateToWidth, visibleWidth } from '@mariozechner/pi-tui';
+import type { Theme } from '@earendil-works/pi-coding-agent';
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import type { ExperimentState, ExperimentResult } from '../types/index.js';
 import { formatNum, isBetter } from '../utils/index.js';
 import { renderScatterPlot } from './scatter-plot.js';

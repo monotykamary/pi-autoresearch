@@ -21,8 +21,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
 import { createServer, type Server, type ServerResponse } from 'node:http';
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Text, truncateToWidth } from '@mariozechner/pi-tui';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import type {
   AutoresearchRuntime,
   ExperimentState,

@@ -2,8 +2,8 @@
  * Scatter plot chart visualization for experiment results
  */
 
-import type { Theme } from '@mariozechner/pi-coding-agent';
-import { visibleWidth } from '@mariozechner/pi-tui';
+import type { Theme } from '@earendil-works/pi-coding-agent';
+import { visibleWidth } from '@earendil-works/pi-tui';
 import type { ExperimentResult } from '../types/index.js';
 import { formatNum } from '../utils/format.js';
 

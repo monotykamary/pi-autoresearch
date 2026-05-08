@@ -4,7 +4,7 @@
  * Delegates to the pi-autoresearch CLI for actual state management.
  */
 
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { AutoresearchRuntime } from './types/index.js';
 import { createExperimentState } from './state/index.js';
 

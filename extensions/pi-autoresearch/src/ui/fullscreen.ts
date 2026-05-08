@@ -2,15 +2,15 @@
  * Fullscreen dashboard overlay TUI
  */
 
-import { matchesKey, Key, visibleWidth, truncateToWidth } from "@mariozechner/pi-tui";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { AutoresearchRuntime } from "../types/index.js";
-import { renderDashboardLines } from "../dashboard/index.js";
-import { formatElapsed } from "../utils/format.js";
-import { getDisplayWorktreePath } from "../git/index.js";
+import { matchesKey, Key, visibleWidth, truncateToWidth } from '@earendil-works/pi-tui';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { AutoresearchRuntime } from '../types/index.js';
+import { renderDashboardLines } from '../dashboard/index.js';
+import { formatElapsed } from '../utils/format.js';
+import { getDisplayWorktreePath } from '../git/index.js';
 
 const AUTORESEARCH_OVERLAY_MAX_HEIGHT_RATIO = 0.9;
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 /** Dependencies needed by fullscreen functions */
 export interface FullscreenContext {
@@ -49,10 +49,7 @@ export function clearFullscreen(state: FullscreenState): void {
 /**
  * Create fullscreen dashboard handler
  */
-export function createFullscreenHandler(
-  uiState: FullscreenState,
-  ctx: FullscreenContext
-) {
+export function createFullscreenHandler(uiState: FullscreenState, ctx: FullscreenContext) {
   const { getRuntime } = ctx;
 
   return async function showFullscreen(extCtx: ExtensionContext): Promise<void> {
@@ -60,7 +57,7 @@ export function createFullscreenHandler(
     const state = runtime.state;
 
     if (state.results.length === 0) {
-      extCtx.ui.notify("No experiments yet", "info");
+      extCtx.ui.notify('No experiments yet', 'info');
       return;
     }
 
@@ -88,13 +85,14 @@ export function createFullscreenHandler(
             const sectionW = innerW - 2;
             lastSectionWidth = sectionW;
 
-            const border = (s: string) => theme.fg("dim", s);
-            const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
+            const border = (s: string) => theme.fg('dim', s);
+            const pad = (s: string, len: number) =>
+              s + ' '.repeat(Math.max(0, len - visibleWidth(s)));
             const row = (content: string) => {
               const safe = truncateToWidth(content, sectionW);
-              return border("│") + pad(" " + safe, innerW) + border("│");
+              return border('│') + pad(' ' + safe, innerW) + border('│');
             };
-            const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
+            const emptyRow = () => border('│') + ' '.repeat(innerW) + border('│');
 
             const worktreeDisplay = runtime.worktreeDir
               ? getDisplayWorktreePath(extCtx.cwd, runtime.worktreeDir)
@@ -103,14 +101,12 @@ export function createFullscreenHandler(
 
             // Add running experiment as next row in the list
             if (runtime.runningExperiment) {
-              const elapsed = formatElapsed(
-                Date.now() - runtime.runningExperiment.startedAt
-              );
+              const elapsed = formatElapsed(Date.now() - runtime.runningExperiment.startedAt);
               const frame = SPINNER[uiState.spinnerFrame % SPINNER.length];
               const nextIdx = state.results.length + 1;
               content.push(
-                `  ${theme.fg("dim", String(nextIdx).padEnd(3))}` +
-                  theme.fg("warning", `${frame} running… ${elapsed}`)
+                `  ${theme.fg('dim', String(nextIdx).padEnd(3))}` +
+                  theme.fg('warning', `${frame} running… ${elapsed}`)
               );
             }
 
@@ -125,8 +121,8 @@ export function createFullscreenHandler(
             const out: string[] = [];
 
             // Title bar with border
-            const titlePrefix = "🔬 autoresearch";
-            const nameStr = state.name ? `: ${state.name}` : "";
+            const titlePrefix = '🔬 autoresearch';
+            const nameStr = state.name ? `: ${state.name}` : '';
             const titleContent = titlePrefix + nameStr;
             const titleText = ` ${titleContent} `;
             const titleLen = visibleWidth(titleContent) + 2;
@@ -135,9 +131,9 @@ export function createFullscreenHandler(
             const rightBorder = borderLen - leftBorder;
 
             out.push(
-              border("╭" + "─".repeat(leftBorder)) +
-                theme.fg("accent", titleText) +
-                border("─".repeat(rightBorder) + "╮")
+              border('╭' + '─'.repeat(leftBorder)) +
+                theme.fg('accent', titleText) +
+                border('─'.repeat(rightBorder) + '╮')
             );
 
             out.push(emptyRow());
@@ -156,17 +152,17 @@ export function createFullscreenHandler(
             const visibleEnd = Math.min(scrollOffset + viewportRows, totalRows);
             const scrollState =
               totalRows <= viewportRows
-                ? "all"
+                ? 'all'
                 : scrollOffset === 0
-                  ? "top"
+                  ? 'top'
                   : visibleEnd >= totalRows
-                    ? "bottom"
+                    ? 'bottom'
                     : `${Math.round((visibleEnd / totalRows) * 100)}%`;
             const scrollInfo = ` ${visibleStart}-${visibleEnd}/${totalRows} • ${scrollState}`;
             const helpText = `↑↓/j/k scroll • u/d page • g/G top/bottom • esc close${scrollInfo}`;
-            out.push(border("├" + "─".repeat(innerW) + "┤"));
-            out.push(row(theme.fg("dim", " " + helpText)));
-            out.push(border("╰" + "─".repeat(innerW) + "╯"));
+            out.push(border('├' + '─'.repeat(innerW) + '┤'));
+            out.push(row(theme.fg('dim', ' ' + helpText)));
+            out.push(border('╰' + '─'.repeat(innerW) + '╯'));
 
             return out;
           },
@@ -182,24 +178,26 @@ export function createFullscreenHandler(
             const worktreeDisplayRows = runtime.worktreeDir
               ? getDisplayWorktreePath(extCtx.cwd, runtime.worktreeDir)
               : null;
-            const totalRows = renderDashboardLines(state, lastSectionWidth, theme, 0, worktreeDisplayRows).length + (runtime.runningExperiment ? 1 : 0);
+            const totalRows =
+              renderDashboardLines(state, lastSectionWidth, theme, 0, worktreeDisplayRows).length +
+              (runtime.runningExperiment ? 1 : 0);
             const maxScroll = Math.max(0, totalRows - viewportRows);
 
-            if (matchesKey(data, Key.escape) || data === "q") {
+            if (matchesKey(data, Key.escape) || data === 'q') {
               done(undefined);
               return;
             }
-            if (matchesKey(data, Key.up) || data === "k") {
+            if (matchesKey(data, Key.up) || data === 'k') {
               scrollOffset = Math.max(0, scrollOffset - 1);
-            } else if (matchesKey(data, Key.down) || data === "j") {
+            } else if (matchesKey(data, Key.down) || data === 'j') {
               scrollOffset = Math.min(maxScroll, scrollOffset + 1);
-            } else if (matchesKey(data, Key.pageUp) || data === "u") {
+            } else if (matchesKey(data, Key.pageUp) || data === 'u') {
               scrollOffset = Math.max(0, scrollOffset - viewportRows);
-            } else if (matchesKey(data, Key.pageDown) || data === "d") {
+            } else if (matchesKey(data, Key.pageDown) || data === 'd') {
               scrollOffset = Math.min(maxScroll, scrollOffset + viewportRows);
-            } else if (data === "g") {
+            } else if (data === 'g') {
               scrollOffset = 0;
-            } else if (data === "G") {
+            } else if (data === 'G') {
               scrollOffset = maxScroll;
             }
             tui.requestRender();
@@ -215,9 +213,9 @@ export function createFullscreenHandler(
       {
         overlay: true,
         overlayOptions: {
-          width: "95%",
-          maxHeight: "90%",
-          anchor: "center" as const,
+          width: '95%',
+          maxHeight: '90%',
+          anchor: 'center' as const,
         },
       }
     );
