@@ -14,6 +14,8 @@ export interface ASI {
 }
 
 export interface ExperimentResult {
+  /** Run number from autoresearch.jsonl (1-based) */
+  run: number;
   commit: string;
   metric: number;
   /** Additional tracked metrics: { name: value } */

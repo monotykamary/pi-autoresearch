@@ -21,7 +21,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
 import { createServer, type Server, type ServerResponse } from 'node:http';
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  SessionBeforeCompactEvent,
+} from '@mariozechner/pi-coding-agent';
 import { Text, truncateToWidth } from '@mariozechner/pi-tui';
 import type {
   AutoresearchRuntime,
@@ -41,6 +45,11 @@ import {
 import { renderDashboardLines } from './src/dashboard/index.js';
 import { formatNum, isBetter, currentResults, findBaselineSecondary } from './src/utils/index.js';
 import { getDisplayWorktreePath } from './src/git/index.js';
+import {
+  autoresearchSummaryPathsFor,
+  buildAutoresearchCompactionSummary,
+} from './src/compaction/index.js';
+import { resolveAutoresearchShortcuts, dashboardHintVariants } from './src/shortcuts/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -174,7 +183,10 @@ function resolveWorkDir(ctxCwd: string): string {
 // Widget (reads from harness server state via JSONL file watcher)
 // ---------------------------------------------------------------------------
 
-function createHarnessWidgetUpdater(getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime) {
+function createHarnessWidgetUpdater(
+  getRuntime: (ctx: ExtensionContext) => AutoresearchRuntime,
+  shortcuts: import('./src/shortcuts/index.js').AutoresearchShortcuts
+) {
   return function updateWidget(extCtx: ExtensionContext): void {
     if (!extCtx.hasUI) return;
 
@@ -186,10 +198,11 @@ function createHarnessWidgetUpdater(getRuntime: (ctx: ExtensionContext) => Autor
       if (runtime.dashboardExpanded) {
         extCtx.ui.setWidget('autoresearch', (_tui, theme) => {
           const lines: string[] = [];
-          const hintText = ' ctrl+x collapse • ctrl+shift+x fullscreen ';
+          const collapseHints = dashboardHintVariants(shortcuts, 'collapse');
+          const hintText = collapseHints.length > 0 ? ` ${collapseHints[0]} ` : '';
           const labelPrefix = '🔬 autoresearch';
           let nameStr = state.name ? `: ${state.name}` : '';
-          const maxLabelLen = width - 3 - 2 - hintText.length - 1;
+          const maxLabelLen = hintText ? width - 3 - 2 - hintText.length - 1 : width - 3 - 2 - 1;
           let label = labelPrefix + nameStr;
           if (label.length > maxLabelLen) {
             label = label.slice(0, maxLabelLen - 1) + '…';
@@ -317,7 +330,10 @@ function createHarnessWidgetUpdater(getRuntime: (ctx: ExtensionContext) => Autor
             parts.push(theme.fg('dim', ` │ ${state.name}`));
           }
 
-          parts.push(theme.fg('dim', '  (ctrl+x expand • ctrl+shift+x fullscreen)'));
+          const expandHints = dashboardHintVariants(shortcuts, 'expand');
+          if (expandHints.length > 0) {
+            parts.push(theme.fg('dim', `  (${expandHints[0]})`));
+          }
 
           return new Text(truncateToWidth(parts.join(''), width), width);
         });
@@ -397,6 +413,7 @@ function reconstructStateFromJsonl(runtime: AutoresearchRuntime, workDir: string
         }
         if (entry.run && typeof entry.run === 'number') {
           const experiment: ExperimentResult = {
+            run: entry.run,
             commit: entry.commit ?? 'unknown',
             metric: entry.metric ?? 0,
             metrics: entry.metrics ?? {},
@@ -528,26 +545,30 @@ function notifyAutoResumeLimitReached(ctx: ExtensionContext): void {
   ctx.ui.notify(`Autoresearch auto-resume limit reached (${MAX_AUTORESUME_TURNS} turns)`, 'info');
 }
 
-function composeResumeMessage(ctx: ExtensionContext): string {
-  const workDir = resolveWorkDir(ctx.cwd);
-  const parts = [
-    'Autoresearch loop ended (likely context limit and auto-compaction).',
-    'Re-read the persisted autoresearch context before continuing: autoresearch.md (rules), the tail of autoresearch.jsonl (recent kept/discarded runs and ASI), and git log (commits map 1:1 to kept experiments).',
-  ];
-  if (fs.existsSync(autoresearchIdeasPath(workDir))) {
-    parts.push(
-      'Then check autoresearch.ideas.md for promising paths to explore and prune stale/tried ideas.'
-    );
-  }
-  parts.push('Resume the experiment loop with the next most promising hypothesis.');
-  parts.push(BENCHMARK_GUARDRAIL);
-  return parts.join(' ');
+function composeResumeMessage(_ctx: ExtensionContext): string {
+  return [
+    'Run the next iteration now.',
+    'Use the persisted autoresearch state as needed, pick the most promising hypothesis, then call pi-autoresearch run + log.',
+    BENCHMARK_GUARDRAIL,
+  ].join(' ');
+}
+
+function composeCompactionResumeMessage(_ctx: ExtensionContext): string {
+  // The compaction summary already contains the rules, ideas, and recent
+  // runs — so this resume message just kicks the loop forward.
+  return [
+    'Run the next iteration now.',
+    'Pick the most promising hypothesis from the ideas backlog or the latest `next:` hints in recent runs, then call pi-autoresearch run + log.',
+    'Do not re-read autoresearch.md or autoresearch.jsonl — the compaction summary already contains them.',
+    BENCHMARK_GUARDRAIL,
+  ].join(' ');
 }
 
 function ensurePendingResume(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  gate: (runtime: AutoresearchRuntime) => boolean
+  gate: (runtime: AutoresearchRuntime) => boolean,
+  composeMessage: (ctx: ExtensionContext) => string = composeResumeMessage
 ): void {
   const runtime = getRuntimeFromCtx(ctx);
   if (hasPendingResume(runtime)) {
@@ -559,7 +580,7 @@ function ensurePendingResume(
     notifyAutoResumeLimitReached(ctx);
     return;
   }
-  schedulePendingResume(pi, ctx, runtime, composeResumeMessage(ctx));
+  schedulePendingResume(pi, ctx, runtime, composeMessage(ctx));
 }
 
 /** Send a message immediately if idle, otherwise as a follow-up */
@@ -844,7 +865,9 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   const uiState: FullscreenState = createFullscreenState();
   const clearOverlay = () => clearFullscreen(uiState);
 
-  const updateWidget = createHarnessWidgetUpdater(getRuntime);
+  const shortcuts = resolveAutoresearchShortcuts();
+
+  const updateWidget = createHarnessWidgetUpdater(getRuntime, shortcuts);
 
   const harnessServer = createHarnessServer();
 
@@ -970,27 +993,33 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   });
 
   // ===========================================================================
-  // Keyboard shortcuts
+  // Keyboard shortcuts (configurable)
   // ===========================================================================
 
-  pi.registerShortcut('ctrl+shift+a', {
-    description: 'Toggle autoresearch dashboard',
-    handler: async (ctx) => {
-      const runtime = getRuntime(ctx);
-      if (runtime.state.results.length === 0) {
-        ctx.ui.notify('No experiments yet', 'info');
-        return;
-      }
-      runtime.dashboardExpanded = !runtime.dashboardExpanded;
-      updateWidget(ctx);
-    },
-  });
+  // shortcuts resolved above (shared with widget updater)
 
-  const showFullscreen = createFullscreenHandler(uiState, { getRuntime });
-  pi.registerShortcut('ctrl+shift+x', {
-    description: 'Fullscreen autoresearch dashboard',
-    handler: showFullscreen,
-  });
+  if (shortcuts.toggleDashboard) {
+    pi.registerShortcut(shortcuts.toggleDashboard, {
+      description: 'Toggle autoresearch dashboard',
+      handler: async (ctx) => {
+        const runtime = getRuntime(ctx);
+        if (runtime.state.results.length === 0) {
+          ctx.ui.notify('No experiments yet', 'info');
+          return;
+        }
+        runtime.dashboardExpanded = !runtime.dashboardExpanded;
+        updateWidget(ctx);
+      },
+    });
+  }
+
+  if (shortcuts.fullscreenDashboard) {
+    const showFullscreen = createFullscreenHandler(uiState, { getRuntime });
+    pi.registerShortcut(shortcuts.fullscreenDashboard, {
+      description: 'Fullscreen autoresearch dashboard',
+      handler: showFullscreen,
+    });
+  }
 
   // ===========================================================================
   // System prompt injection — autoresearch guidance on every turn
@@ -1012,7 +1041,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       '\n\n## Autoresearch Mode (ACTIVE)' +
       '\nYou are in autoresearch mode. Optimize the primary metric through an autonomous experiment loop.' +
       '\nUse pi-autoresearch init, run, and log to manage experiments. NEVER STOP until interrupted.' +
-      `\nExperiment rules: ${mdPath} — read this file at the start of every session and after compaction.` +
+      `\nExperiment rules: ${mdPath} — read this file at the start of every session. After compaction, the rules are included in the compaction summary.` +
       "\nWrite promising but deferred optimizations as bullet points to autoresearch.ideas.md — don't let good ideas get lost." +
       `\n${BENCHMARK_GUARDRAIL}` +
       '\nIf the user sends a follow-on message while an experiment is running, finish the current run + log cycle first, then address their message in the next iteration.';
@@ -1046,12 +1075,27 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     pausePendingResume(runtime);
   });
 
-  pi.on('session_before_compact', async (_event, extCtx) => {
-    pausePendingResume(getRuntime(extCtx));
+  pi.on('session_before_compact', async (event, extCtx) => {
+    const runtime = getRuntime(extCtx);
+    pausePendingResume(runtime);
+
+    if (!runtime.autoresearchMode) return undefined;
+
+    const workDir = runtime.worktreeDir ?? resolveWorkDir(extCtx.cwd);
+    return {
+      compaction: {
+        summary: buildAutoresearchCompactionSummary(
+          autoresearchSummaryPathsFor(workDir),
+          runtime.state
+        ),
+        firstKeptEntryId: event.preparation.firstKeptEntryId,
+        tokensBefore: event.preparation.tokensBefore,
+      },
+    };
   });
 
   pi.on('session_compact', async (_event, extCtx) => {
-    ensurePendingResume(pi, extCtx, shouldAutoResumeAfterCompact);
+    ensurePendingResume(pi, extCtx, shouldAutoResumeAfterCompact, composeCompactionResumeMessage);
   });
 
   pi.on('agent_end', async (_event, extCtx) => {

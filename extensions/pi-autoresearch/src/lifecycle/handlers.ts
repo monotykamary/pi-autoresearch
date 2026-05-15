@@ -116,6 +116,7 @@ function createReconstructor(ctx: LifecycleContext) {
             }
             if (entry.run && typeof entry.run === 'number') {
               runtime.state.results.push({
+                run: entry.run,
                 commit: entry.commit ?? 'unknown',
                 metric: entry.metric ?? 0,
                 metrics: entry.metrics ?? {},

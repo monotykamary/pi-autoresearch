@@ -246,6 +246,7 @@ describe('computeConfidence', () => {
     status: ExperimentResult['status'] = 'keep',
     segment = 0
   ): ExperimentResult => ({
+    run: 1,
     commit: 'abc1234',
     metric,
     metrics: {},
@@ -341,6 +342,7 @@ describe('computeConfidence', () => {
 // ============================================================================
 describe('findBaselineMetric', () => {
   const createResult = (metric: number, segment = 0): ExperimentResult => ({
+    run: 1,
     commit: 'abc1234',
     metric,
     metrics: {},
@@ -382,6 +384,7 @@ describe('findBaselineMetric', () => {
 // ============================================================================
 describe('currentResults', () => {
   const createResult = (metric: number, segment = 0): ExperimentResult => ({
+    run: 1,
     commit: 'abc1234',
     metric,
     metrics: {},

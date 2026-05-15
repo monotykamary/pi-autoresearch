@@ -14,6 +14,7 @@ const createSegmentResult = (
   status: ExperimentResult['status'] = 'keep',
   segment = 0
 ): ExperimentResult => ({
+  run: runNumber,
   commit: `abc${runNumber.toString().padStart(4, '0')}`,
   metric,
   metrics: {},

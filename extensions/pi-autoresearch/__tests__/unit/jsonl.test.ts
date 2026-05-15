@@ -175,6 +175,7 @@ describe('JSONL reconstruction', () => {
       }
       if (entry.run) {
         state.results.push({
+          run: entry.run,
           commit: entry.commit,
           metric: entry.metric,
           metrics: entry.metrics,
@@ -245,6 +246,7 @@ describe('JSONL reconstruction', () => {
         }
         if (entry.run && typeof entry.run === 'number') {
           state.results.push({
+            run: entry.run,
             commit: entry.commit,
             metric: entry.metric,
             metrics: entry.metrics || {},

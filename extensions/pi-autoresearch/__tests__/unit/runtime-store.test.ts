@@ -43,6 +43,7 @@ describe('Runtime Store Session Isolation', () => {
     runtime1.autoresearchMode = true;
     runtime1.state.name = 'Session 1 Experiment';
     runtime1.state.results.push({
+      run: 1,
       commit: 'abc123',
       metric: 100,
       metrics: {},

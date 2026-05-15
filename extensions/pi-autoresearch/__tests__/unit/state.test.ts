@@ -167,6 +167,7 @@ describe('Widget state behaviors', () => {
       runtime.state.name = 'Test Session';
       runtime.state.results = [
         {
+          run: 1,
           commit: 'abc1234',
           metric: 100,
           metrics: {},
@@ -204,6 +205,7 @@ describe('Widget state behaviors', () => {
       runtime.experimentCompletedWaitingForLog = false;
       runtime.lastRunSucceeded = null;
       runtime.state.results.push({
+        run: 1,
         commit: 'abc1234',
         metric: 100,
         metrics: {},
@@ -240,6 +242,7 @@ describe('Widget state behaviors', () => {
       runtime.experimentCompletedWaitingForLog = false;
       runtime.lastRunSucceeded = null;
       runtime.state.results.push({
+        run: 1,
         commit: 'abc1234',
         metric: 0,
         metrics: {},
@@ -283,6 +286,7 @@ describe('Widget state behaviors', () => {
       runtime.state.name = 'Test Session';
       runtime.state.results = [
         {
+          run: 1,
           commit: 'abc1234',
           metric: 100,
           metrics: {},
@@ -303,6 +307,7 @@ describe('Widget state behaviors', () => {
       runtime.state.name = 'Test Session';
       runtime.state.results = [
         {
+          run: 1,
           commit: 'abc1234',
           metric: 100,
           metrics: {},
@@ -333,6 +338,7 @@ describe('Session lifecycle cleanup', () => {
       runtime.state.name = 'Optimize performance';
       runtime.state.results = [
         {
+          run: 1,
           commit: 'abc1234',
           metric: 100,
           metrics: {},
