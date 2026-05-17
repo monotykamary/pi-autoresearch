@@ -192,7 +192,11 @@ function createHarnessWidgetUpdater(
 
     const runtime = getRuntime(extCtx);
     const state = runtime.state;
-    const width = process.stdout.columns || 120;
+    const termWidth = process.stdout.columns || 120;
+    // Container wraps widgets with paddingX=1 (2 columns total). The
+    // content width Text.render() receives is termWidth - 2. Truncate to
+    // that width so wrapTextWithAnsi does not split lines.
+    const width = termWidth - 2;
 
     if (state.results.length > 0) {
       if (runtime.dashboardExpanded) {
@@ -202,12 +206,20 @@ function createHarnessWidgetUpdater(
           const hintText = collapseHints.length > 0 ? ` ${collapseHints[0]} ` : '';
           const labelPrefix = '🔬 autoresearch';
           let nameStr = state.name ? `: ${state.name}` : '';
-          const maxLabelLen = hintText ? width - 3 - 2 - hintText.length - 1 : width - 3 - 2 - 1;
+          // Expanded header: use termWidth for layout so border dashes span
+          // the full terminal width. The last 2 visible chars may wrap to a
+          // second line (Container passes contentWidth = termWidth - 2 to
+          // Text.render), but since they are border dashes the visual gap
+          // is negligible.
+          const expandedW = termWidth;
+          const maxLabelLen = hintText
+            ? expandedW - 3 - 2 - hintText.length - 1
+            : expandedW - 3 - 2 - 1;
           let label = labelPrefix + nameStr;
           if (label.length > maxLabelLen) {
             label = label.slice(0, maxLabelLen - 1) + '…';
           }
-          const fillLen = Math.max(0, width - 3 - 1 - label.length - 1 - hintText.length);
+          const fillLen = Math.max(0, expandedW - 3 - 1 - label.length - 1 - hintText.length);
           const leftBorder = '───';
           const rightBorder = '─'.repeat(fillLen);
           lines.push(
@@ -216,12 +228,13 @@ function createHarnessWidgetUpdater(
                 theme.fg('accent', ' ' + label + ' ') +
                 theme.fg('borderMuted', rightBorder) +
                 theme.fg('dim', hintText),
-              width
+              expandedW
             )
           );
           const worktreeDisplay = runtime.worktreeDir
             ? getDisplayWorktreePath(extCtx.cwd, runtime.worktreeDir)
             : null;
+          // Dashboard table lines use content width so they don't wrap.
           lines.push(...renderDashboardLines(state, width, theme, 6, worktreeDisplay));
           return new Text(lines.join('\n'), 0, 0);
         });
@@ -335,7 +348,7 @@ function createHarnessWidgetUpdater(
             parts.push(theme.fg('dim', `  (${expandHints[0]})`));
           }
 
-          return new Text(truncateToWidth(parts.join(''), width), width);
+          return new Text(truncateToWidth(parts.join(''), width), 0, 0);
         });
       }
       return;
@@ -349,7 +362,7 @@ function createHarnessWidgetUpdater(
           theme.fg('text', ` ${state.name}`),
           theme.fg('dim', ' — ready'),
         ];
-        return new Text(truncateToWidth(parts.join(''), width), width);
+        return new Text(truncateToWidth(parts.join(''), width), 0, 0);
       });
       return;
     }
